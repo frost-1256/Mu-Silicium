@@ -1,0 +1,27 @@
+name: Build UEFI for spacewar
+
+on:
+  workflow_dispatch:
+
+env:
+  CI_BUILD: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Build UEFI for spacewar
+        run: bash ./setup_env.sh -p apt && python3 build_uefi.py -d spacewar -r DEBUG -c
+
+      - name: Upload UEFI image
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: uefi-spacewar
+          path: ./Mu-*
+          compression-level: 9
+          if-no-files-found: warn
