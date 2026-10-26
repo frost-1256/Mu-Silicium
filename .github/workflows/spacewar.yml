@@ -15,6 +15,25 @@ jobs:
       - name: Fetch submodules (shallow, parallel)
         run: git submodule update --init --recursive --depth 1 --jobs 8
 
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: apt-cache
+          key: apt-${{ hashFiles('setup_env.sh') }}
+          restore-keys: apt-
+
+      - name: Prime apt cache
+        run: |
+          mkdir -p apt-cache
+          sudo cp -n apt-cache/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('pip-requirements.txt') }}
+          restore-keys: pip-
+
       - name: Refresh package lists
         run: sudo apt-get update
 
@@ -22,6 +41,10 @@ jobs:
         run: |
           time bash ./setup_env.sh -p apt
           time python3 build_uefi.py -d spacewar -r DEBUG -c
+
+      - name: Update apt cache
+        if: always()
+        run: sudo cp -n /var/cache/apt/archives/*.deb apt-cache/ 2>/dev/null || true
 
       - name: Upload UEFI image
         if: always()
