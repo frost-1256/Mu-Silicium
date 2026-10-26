@@ -9,7 +9,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          submodules: recursive
+          submodules: false
+          fetch-depth: 1
+
+      - name: Fetch submodules (shallow, parallel)
+        run: git submodule update --init --recursive --depth 1 --jobs 8
 
       - name: Refresh package lists
         run: sudo apt-get update
