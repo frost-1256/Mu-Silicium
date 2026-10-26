@@ -19,7 +19,9 @@ jobs:
         run: sudo apt-get update
 
       - name: Build UEFI for spacewar
-        run: bash ./setup_env.sh -p apt && python3 build_uefi.py -d spacewar -r DEBUG -c
+        run: |
+          time bash ./setup_env.sh -p apt
+          time python3 build_uefi.py -d spacewar -r DEBUG -c
 
       - name: Upload UEFI image
         if: always()
