@@ -1,0 +1,28 @@
+[Defines]
+  INF_VERSION                    = 0x0001001B
+  BASE_NAME                      = TscPwrDxe
+  FILE_GUID                      = 1a799c27-4f8f-4bd1-ae13-cf36acf7dbf2
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 0.1
+  ENTRY_POINT                    = TscPwrDxeEntry
+
+[Sources]
+  TscPwrDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  QcomPkg/QcomPkg.dec
+
+[LibraryClasses]
+  UefiDriverEntryPoint
+  UefiBootServicesTableLib
+  DebugLib
+  PrintLib
+
+[Protocols]
+  gEfiRpmhProtocolGuid
+  gEfiCmdDbProtocolGuid
+  gEfiSimpleFileSystemProtocolGuid
+
+[Depex]
+  gEfiRpmhProtocolGuid AND gEfiCmdDbProtocolGuid

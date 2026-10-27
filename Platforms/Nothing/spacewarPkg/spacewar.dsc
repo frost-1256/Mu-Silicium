@@ -88,3 +88,8 @@
   # ACPI Tables
   #
   spacewar/AcpiTables.inf
+
+  #
+  # Touch power probe (FT3680 rails; see Drivers/TscPwrDxe)
+  #
+  spacewarPkg/Drivers/TscPwrDxe/TscPwrDxe.inf
