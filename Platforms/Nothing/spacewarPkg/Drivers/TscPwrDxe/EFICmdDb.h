@@ -4,9 +4,13 @@
 
   PmicDxeLa locates this GUID in four wrappers (@0x171D4, @0x17250,
   @0x172CC, @0x17348) around its PRM resource init (pm_prm_init.c).
-  Resources are keyed by a UINT64: the resource name packed as 8
-  little-endian ASCII bytes (CmdDb convention), e.g. "ldoc3" ->
-  0x00000033636F646C. The wrappers pass the key BY VALUE.
+  The wrappers pass the resource descriptor's +0x18 field as the
+  lookup argument. Runtime evidence (probe v0.2 crash on device,
+  FAR = 0x00000033636F646C = the packed bytes of "ldoc3"): the
+  field is a POINTER to the resource name string and the methods
+  dereference it — passing the packed-name value instead faults.
+  (A CHAR8 name buffer also reads as the packed UINT64 key, so a
+  string pointer satisfies either interpretation.)
 
   Methods take the protocol as first argument (This-style), unlike
   the RPMh protocol. Only observed methods are typed.
@@ -30,7 +34,7 @@ typedef
 EFI_STATUS
 (EFIAPI *CMDDB_GET_ADDRESS)(
   IN  EFI_CMDDB_PROTOCOL  *This,
-  IN  UINT64               Key,
+  IN  CONST CHAR8         *Name,
   OUT UINT32              *Address
   );
 
@@ -42,7 +46,7 @@ typedef
 EFI_STATUS
 (EFIAPI *CMDDB_GET_VERSION)(
   IN  EFI_CMDDB_PROTOCOL  *This,
-  IN  UINT64               Key,
+  IN  CONST CHAR8         *Name,
   OUT UINT16              *Version
   );
 

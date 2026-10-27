@@ -10,8 +10,8 @@
   winboot/UEFI_TOUCH_POWER_PLAN.md.
 
   THIS BUILD IS A PROBE (v0.2). It issues NO votes. It only:
-    1. Locates the CmdDb protocol and queries, for the packed-name
-       keys "ldoc3" / "ldoc8": GetVersion (+0x28) and GetAddress
+    1. Locates the CmdDb protocol and queries, for the resource
+       names "ldoc3" / "ldoc8": GetVersion (+0x28) and GetAddress
        (+0x10).
     2. Locates the RPMh protocol and calls CreateHandle with the
        candidate DrvIds {0, 1, 2} (the value PmicDxeLa resolves on
@@ -33,11 +33,6 @@
 #include "EFIRpmh.h"
 #include "EFICmdDb.h"
 #include <Protocol/SimpleFileSystem.h>
-
-#define TSC_CMDDB_KEY(Name)  \
-  ((UINT64)(Name)[0]        | ((UINT64)(Name)[1] << 8)  | \
-   ((UINT64)(Name)[2] << 16) | ((UINT64)(Name)[3] << 24) | \
-   ((UINT64)(Name)[4] << 32))
 
 STATIC
 EFI_STATUS
@@ -134,7 +129,7 @@ TscPwrDxeEntry (
   VOID                *Handle;
   EFI_STATUS           StH;
 
-  Len = AsciiSPrint (Buf, sizeof (Buf), "TscPwr probe v0.2\n");
+  Len = AsciiSPrint (Buf, sizeof (Buf), "TscPwr probe v0.3\n");
 
   CmdDb = NULL;
   if (!EFI_ERROR (gBS->LocateProtocol (
@@ -143,11 +138,11 @@ TscPwrDxeEntry (
                          (VOID **)&CmdDb
                          ))) {
     Addr3 = 0; Ver3 = 0;
-    StV3 = CmdDb->GetVersion (CmdDb, TSC_CMDDB_KEY ("ldoc3"), &Ver3);
-    St3  = CmdDb->GetAddress (CmdDb, TSC_CMDDB_KEY ("ldoc3"), &Addr3);
+    StV3 = CmdDb->GetVersion (CmdDb, "ldoc3", &Ver3);
+    St3  = CmdDb->GetAddress (CmdDb, "ldoc3", &Addr3);
     Addr8 = 0; Ver8 = 0;
-    StV8 = CmdDb->GetVersion (CmdDb, TSC_CMDDB_KEY ("ldoc8"), &Ver8);
-    St8  = CmdDb->GetAddress (CmdDb, TSC_CMDDB_KEY ("ldoc8"), &Addr8);
+    StV8 = CmdDb->GetVersion (CmdDb, "ldoc8", &Ver8);
+    St8  = CmdDb->GetAddress (CmdDb, "ldoc8", &Addr8);
     Len += AsciiSPrint (
              Buf + Len, sizeof (Buf) - Len,
              "CmdDb ldoc3: ver st=%r ver=0x%x addr st=%r addr=0x%x\n"
