@@ -23,6 +23,7 @@
   BaseLib
   BaseMemoryLib
   UefiRuntimeServicesTableLib
+  UefiLib
 
 [Protocols]
   gEfiRpmhProtocolGuid

@@ -33,6 +33,7 @@
 #include <Library/BaseMemoryLib.h>
 #include <Library/PrintLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
+#include <Library/UefiLib.h>
 #include <Guid/EventGroup.h>
 #include "EFIRpmh.h"
 #include "EFICmdDb.h"
@@ -157,6 +158,32 @@ ProbeClose (
   }
 }
 
+
+STATIC
+VOID
+Say (
+  IN CHAR8  *Text
+  )
+{
+  CHAR16  Uni[256];
+  UINTN   I;
+
+  for (I = 0; Text[I] != 0 && I < 250; I++) {
+    Uni[I] = (CHAR16)Text[I];
+  }
+  Uni[I] = 0;
+  if (gST != NULL && gST->ConOut != NULL) {
+    gST->ConOut->OutputString (gST->ConOut, Uni);
+    gST->ConOut->OutputString (gST->ConOut, L"\r\n");
+  }
+  DEBUG ((DEBUG_ERROR, "TSCPROBE: %a\n", Text));
+  ProbeLog (Text);
+  ProbeLog ("\n");
+  if (gBS != NULL) {
+    gBS->Stall (2000000);
+  }
+}
+
 STATIC VOID ProbeStoreVariable (VOID);
 
 STATIC
@@ -174,67 +201,61 @@ ProbeRun (
   UINT32               Idx;
   VOID                *Handle;
 
-  if (EFI_ERROR (ProbeOpen ())) {
-    ProbeLog ("TscPwr probe v0.5 (ESP open failed)\n");
-    ProbeStoreVariable ();
-    return;
-  }
-  ProbeLog ("TscPwr probe v0.5\n");
+  Say ("TscPwr probe v0.6 - staged");
+  ProbeOpen ();
 
   CmdDb = NULL;
   St = gBS->LocateProtocol (&gEfiCmdDbProtocolGuid, NULL, (VOID **)&CmdDb);
-  AsciiSPrint (Line, sizeof (Line), "CmdDb locate st=%r\n", St);
-  ProbeLog (Line);
+  AsciiSPrint (Line, sizeof (Line), "CmdDb locate st=%r", St);
+  Say (Line);
   if (!EFI_ERROR (St)) {
+    Say ("calling GetVersion ldoc3");
     Ver = 0;
     St = CmdDb->GetVersion (CmdDb, "ldoc3", &Ver);
-    AsciiSPrint (Line, sizeof (Line), "ldoc3 ver st=%r ver=0x%x\n", St, Ver);
-    ProbeLog (Line);
+    AsciiSPrint (Line, sizeof (Line), "ldoc3 ver st=%r ver=0x%x", St, Ver);
+    Say (Line);
 
+    Say ("calling GetAddress ldoc3");
     Addr = 0;
     St = CmdDb->GetAddress (CmdDb, "ldoc3", &Addr);
-    AsciiSPrint (Line, sizeof (Line), "ldoc3 addr st=%r addr=0x%x\n", St, Addr);
-    ProbeLog (Line);
+    AsciiSPrint (Line, sizeof (Line), "ldoc3 addr st=%r addr=0x%x", St, Addr);
+    Say (Line);
 
+    Say ("calling GetVersion ldoc8");
     Ver = 0;
     St = CmdDb->GetVersion (CmdDb, "ldoc8", &Ver);
-    AsciiSPrint (Line, sizeof (Line), "ldoc8 ver st=%r ver=0x%x\n", St, Ver);
-    ProbeLog (Line);
+    AsciiSPrint (Line, sizeof (Line), "ldoc8 ver st=%r ver=0x%x", St, Ver);
+    Say (Line);
 
+    Say ("calling GetAddress ldoc8");
     Addr = 0;
     St = CmdDb->GetAddress (CmdDb, "ldoc8", &Addr);
-    AsciiSPrint (Line, sizeof (Line), "ldoc8 addr st=%r addr=0x%x\n", St, Addr);
-    ProbeLog (Line);
+    AsciiSPrint (Line, sizeof (Line), "ldoc8 addr st=%r addr=0x%x", St, Addr);
+    Say (Line);
   }
 
   Rpmh = NULL;
   St = gBS->LocateProtocol (&gEfiRpmhProtocolGuid, NULL, (VOID **)&Rpmh);
-  AsciiSPrint (Line, sizeof (Line), "Rpmh locate st=%r\n", St);
-  ProbeLog (Line);
+  AsciiSPrint (Line, sizeof (Line), "Rpmh locate st=%r", St);
+  Say (Line);
   if (!EFI_ERROR (St)) {
-    AsciiSPrint (Line, sizeof (Line), "Rpmh rev=0x%x\n", Rpmh->Revision);
-    ProbeLog (Line);
+    AsciiSPrint (Line, sizeof (Line), "Rpmh rev=0x%x", Rpmh->Revision);
+    Say (Line);
     for (Idx = 0; Idx <= 2; Idx++) {
+      AsciiSPrint (Line, sizeof (Line), "calling CreateHandle drv=%u", Idx);
+      Say (Line);
       Handle = NULL;
       St = Rpmh->CreateHandle (Idx, "pmic", &Handle);
-      AsciiSPrint (Line, sizeof (Line), "CreateHandle drv=%u st=%r handle=%p\n", Idx, St, Handle);
-      ProbeLog (Line);
+      AsciiSPrint (Line, sizeof (Line), "CreateHandle drv=%u st=%r handle=%p", Idx, St, Handle);
+      Say (Line);
     }
   }
 
-  ProbeLog ("DONE\n");
+  Say ("PROBE DONE");
   ProbeClose ();
   ProbeStoreVariable ();
 }
 
-//
-// The DXE dispatch order runs this driver before BDS connects the
-// storage stack, so at entry there are no SimpleFileSystem handles
-// yet (probe v0.4 booted cleanly but wrote nothing). All work is
-// therefore deferred to the ReadyToBoot event, when the ESP is
-// reachable and the DXE protocols are still alive. As a second
-// channel, the same text is stored in a UEFI variable.
-//
 STATIC EFI_GUID mTscVendorGuid =
   { 0x1a799c27, 0x4f8f, 0x4bd1, { 0xae, 0x13, 0xcf, 0x36, 0xac, 0xf7, 0xdb, 0xf2 } };
 
@@ -257,18 +278,6 @@ ProbeStoreVariable (
          );
 }
 
-STATIC
-VOID
-EFIAPI
-ProbeOnReadyToBoot (
-  IN EFI_EVENT  Event,
-  IN VOID       *Context
-  )
-{
-  ProbeRun ();
-  gBS->CloseEvent (Event);
-}
-
 EFI_STATUS
 EFIAPI
 TscPwrDxeEntry (
@@ -276,14 +285,6 @@ TscPwrDxeEntry (
   IN EFI_SYSTEM_TABLE  *SystemTable
   )
 {
-  EFI_EVENT  Event;
-
-  return gBS->CreateEventEx (
-                EVT_NOTIFY_SIGNAL,
-                TPL_CALLBACK,
-                ProbeOnReadyToBoot,
-                NULL,
-                &gEfiEventReadyToBootGuid,
-                &Event
-                );
+  ProbeRun ();
+  return EFI_SUCCESS;
 }
