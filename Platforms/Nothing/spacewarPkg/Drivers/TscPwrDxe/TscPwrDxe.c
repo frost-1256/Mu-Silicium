@@ -198,8 +198,6 @@ ProbeRun (
   EFI_CMDDB_PROTOCOL  *CmdDb;
   EFI_RPMH_PROTOCOL   *Rpmh;
   CHAR8                Line[256];
-  UINT32               Addr;
-  UINT16               Ver;
   EFI_STATUS           St;
   UINT32               Idx;
   VOID                *Handle;
