@@ -20,6 +20,7 @@
   UefiBootServicesTableLib
   DebugLib
   PrintLib
+  BaseLib
 
 [Protocols]
   gEfiRpmhProtocolGuid
