@@ -9,7 +9,7 @@
   uses. Protocol facts: EFIRpmh.h / EFICmdDb.h (this directory) and
   winboot/UEFI_TOUCH_POWER_PLAN.md.
 
-  THIS BUILD IS A PROBE (v0.2). It issues NO votes. It only:
+  THIS BUILD IS A PROBE (v0.4, checkpointed). It issues NO votes. It only:
     1. Locates the CmdDb protocol and queries, for the resource
        names "ldoc3" / "ldoc8": GetVersion (+0x28) and GetAddress
        (+0x10).
@@ -34,11 +34,13 @@
 #include "EFICmdDb.h"
 #include <Protocol/SimpleFileSystem.h>
 
+STATIC EFI_FILE_PROTOCOL *gProbeRoot;
+STATIC EFI_FILE_PROTOCOL *gProbeFile;
+
 STATIC
 EFI_STATUS
-WriteProbeFile (
-  IN CHAR8  *Text,
-  IN UINTN   Len
+ProbeOpen (
+  VOID
   )
 {
   EFI_STATUS                     Status;
@@ -46,9 +48,7 @@ WriteProbeFile (
   EFI_HANDLE                    *Handles;
   UINTN                          Index;
   EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *Fs;
-  EFI_FILE_PROTOCOL             *Root;
   EFI_FILE_PROTOCOL             *File;
-  UINTN                          Written;
 
   Status = gBS->LocateHandleBuffer (
                   ByProtocol,
@@ -71,44 +71,79 @@ WriteProbeFile (
                            ))) {
       continue;
     }
-    Root = NULL;
-    if (EFI_ERROR (Fs->OpenVolume (Fs, &Root))) {
+    gProbeRoot = NULL;
+    if (EFI_ERROR (Fs->OpenVolume (Fs, &gProbeRoot))) {
       continue;
     }
     //
     // Identify the ESP by the presence of the \EFI directory.
     //
     File = NULL;
-    Status = Root->Open (
-                     Root,
-                     &File,
-                     L"\\EFI",
-                     EFI_FILE_MODE_READ,
-                     0
-                     );
+    Status = gProbeRoot->Open (
+                           gProbeRoot,
+                           &File,
+                           L"\\EFI",
+                           EFI_FILE_MODE_READ,
+                           0
+                           );
     if (!EFI_ERROR (Status)) {
       File->Close (File);
-      File = NULL;
-      Status = Root->Open (
-                       Root,
-                       &File,
-                       L"\\TSCPROBE.TXT",
-                       EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE,
-                       0
-                       );
+      Status = gProbeRoot->Open (
+                             gProbeRoot,
+                             &gProbeFile,
+                             L"\\TSCPROBE.TXT",
+                             EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE,
+                             0
+                             );
       if (!EFI_ERROR (Status)) {
-        Written = Len;
-        File->Write (File, &Written, Text);
-        File->Close (File);
-        Root->Close (Root);
         break;
       }
     }
-    Root->Close (Root);
+    gProbeRoot->Close (gProbeRoot);
+    gProbeRoot = NULL;
   }
 
   gBS->FreePool (Handles);
   return Status;
+}
+
+//
+// Append one checkpoint line and flush it to the ESP immediately, so
+// the file always shows the last step that COMPLETED even if the
+// next call faults (UEFI has no observable console on this device).
+//
+STATIC
+VOID
+ProbeLog (
+  IN CHAR8  *Text
+  )
+{
+  UINTN  Len;
+  UINTN  Written;
+
+  if (gProbeFile == NULL) {
+    return;
+  }
+  Len = AsciiStrLen (Text);
+  Written = Len;
+  gProbeFile->Write (gProbeFile, &Written, Text);
+  gProbeFile->Flush (gProbeFile);
+}
+
+STATIC
+VOID
+ProbeClose (
+  VOID
+  )
+{
+  if (gProbeFile != NULL) {
+    gProbeFile->Close (gProbeFile);
+    gProbeFile = NULL;
+  }
+  if (gProbeRoot != NULL) {
+    gProbeRoot->Close (gProbeRoot);
+    gProbeRoot = NULL;
+  }
 }
 
 EFI_STATUS
@@ -120,62 +155,60 @@ TscPwrDxeEntry (
 {
   EFI_CMDDB_PROTOCOL  *CmdDb;
   EFI_RPMH_PROTOCOL   *Rpmh;
-  CHAR8                Buf[1024];
-  UINTN                Len;
-  UINT32               Addr3, Addr8;
-  UINT16               Ver3, Ver8;
-  EFI_STATUS           St3, St8, StV3, StV8;
+  CHAR8                Line[256];
+  UINT32               Addr;
+  UINT16               Ver;
+  EFI_STATUS           St;
   UINT32               Idx;
   VOID                *Handle;
-  EFI_STATUS           StH;
 
-  Len = AsciiSPrint (Buf, sizeof (Buf), "TscPwr probe v0.3\n");
+  if (EFI_ERROR (ProbeOpen ())) {
+    return EFI_SUCCESS;
+  }
+  ProbeLog ("TscPwr probe v0.4\n");
 
   CmdDb = NULL;
-  if (!EFI_ERROR (gBS->LocateProtocol (
-                         &gEfiCmdDbProtocolGuid,
-                         NULL,
-                         (VOID **)&CmdDb
-                         ))) {
-    Addr3 = 0; Ver3 = 0;
-    StV3 = CmdDb->GetVersion (CmdDb, "ldoc3", &Ver3);
-    St3  = CmdDb->GetAddress (CmdDb, "ldoc3", &Addr3);
-    Addr8 = 0; Ver8 = 0;
-    StV8 = CmdDb->GetVersion (CmdDb, "ldoc8", &Ver8);
-    St8  = CmdDb->GetAddress (CmdDb, "ldoc8", &Addr8);
-    Len += AsciiSPrint (
-             Buf + Len, sizeof (Buf) - Len,
-             "CmdDb ldoc3: ver st=%r ver=0x%x addr st=%r addr=0x%x\n"
-             "CmdDb ldoc8: ver st=%r ver=0x%x addr st=%r addr=0x%x\n",
-             StV3, Ver3, St3, Addr3, StV8, Ver8, St8, Addr8
-             );
-  } else {
-    Len += AsciiSPrint (Buf + Len, sizeof (Buf) - Len, "CmdDb: NOT FOUND\n");
+  St = gBS->LocateProtocol (&gEfiCmdDbProtocolGuid, NULL, (VOID **)&CmdDb);
+  AsciiSPrint (Line, sizeof (Line), "CmdDb locate st=%r\n", St);
+  ProbeLog (Line);
+  if (!EFI_ERROR (St)) {
+    Ver = 0;
+    St = CmdDb->GetVersion (CmdDb, "ldoc3", &Ver);
+    AsciiSPrint (Line, sizeof (Line), "ldoc3 ver st=%r ver=0x%x\n", St, Ver);
+    ProbeLog (Line);
+
+    Addr = 0;
+    St = CmdDb->GetAddress (CmdDb, "ldoc3", &Addr);
+    AsciiSPrint (Line, sizeof (Line), "ldoc3 addr st=%r addr=0x%x\n", St, Addr);
+    ProbeLog (Line);
+
+    Ver = 0;
+    St = CmdDb->GetVersion (CmdDb, "ldoc8", &Ver);
+    AsciiSPrint (Line, sizeof (Line), "ldoc8 ver st=%r ver=0x%x\n", St, Ver);
+    ProbeLog (Line);
+
+    Addr = 0;
+    St = CmdDb->GetAddress (CmdDb, "ldoc8", &Addr);
+    AsciiSPrint (Line, sizeof (Line), "ldoc8 addr st=%r addr=0x%x\n", St, Addr);
+    ProbeLog (Line);
   }
 
   Rpmh = NULL;
-  if (!EFI_ERROR (gBS->LocateProtocol (
-                         &gEfiRpmhProtocolGuid,
-                         NULL,
-                         (VOID **)&Rpmh
-                         ))) {
-    Len += AsciiSPrint (
-             Buf + Len, sizeof (Buf) - Len,
-             "Rpmh: rev=0x%x\n", Rpmh->Revision
-             );
+  St = gBS->LocateProtocol (&gEfiRpmhProtocolGuid, NULL, (VOID **)&Rpmh);
+  AsciiSPrint (Line, sizeof (Line), "Rpmh locate st=%r\n", St);
+  ProbeLog (Line);
+  if (!EFI_ERROR (St)) {
+    AsciiSPrint (Line, sizeof (Line), "Rpmh rev=0x%x\n", Rpmh->Revision);
+    ProbeLog (Line);
     for (Idx = 0; Idx <= 2; Idx++) {
       Handle = NULL;
-      StH = Rpmh->CreateHandle (Idx, "pmic", &Handle);
-      Len += AsciiSPrint (
-               Buf + Len, sizeof (Buf) - Len,
-               "Rpmh CreateHandle drv=%u st=%r handle=%p\n",
-               Idx, StH, Handle
-               );
+      St = Rpmh->CreateHandle (Idx, "pmic", &Handle);
+      AsciiSPrint (Line, sizeof (Line), "CreateHandle drv=%u st=%r handle=%p\n", Idx, St, Handle);
+      ProbeLog (Line);
     }
-  } else {
-    Len += AsciiSPrint (Buf + Len, sizeof (Buf) - Len, "Rpmh: NOT FOUND\n");
   }
 
-  WriteProbeFile (Buf, Len);
+  ProbeLog ("DONE\n");
+  ProbeClose ();
   return EFI_SUCCESS;
 }
