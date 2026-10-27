@@ -184,6 +184,9 @@ Say (
   }
 }
 
+STATIC EFI_GUID mTscVendorGuid =
+  { 0x1a799c27, 0x4f8f, 0x4bd1, { 0xae, 0x13, 0xcf, 0x36, 0xac, 0xf7, 0xdb, 0xf2 } };
+
 STATIC VOID ProbeStoreVariable (VOID);
 
 STATIC
@@ -200,8 +203,16 @@ ProbeRun (
   EFI_STATUS           St;
   UINT32               Idx;
   VOID                *Handle;
+  UINT32               Addr3, Addr8;
+  UINT16               Ver3, Ver8;
+  EFI_STATUS           StA3, StA8;
+  UINT32               DrvIdx;
+  UINTN                VarSize;
+  STATIC UINT32        DrvCandidates[4] = { 1, 2, 3, 4 };
 
-  Say ("TscPwr probe v0.6 - staged");
+  Addr3 = Addr8 = 0; Ver3 = Ver8 = 0; StA3 = StA8 = EFI_NOT_FOUND;
+
+  Say ("TscPwr probe v0.7 - staged");
   ProbeOpen ();
 
   CmdDb = NULL;
@@ -210,27 +221,23 @@ ProbeRun (
   Say (Line);
   if (!EFI_ERROR (St)) {
     Say ("calling GetVersion ldoc3");
-    Ver = 0;
-    St = CmdDb->GetVersion (CmdDb, "ldoc3", &Ver);
-    AsciiSPrint (Line, sizeof (Line), "ldoc3 ver st=%r ver=0x%x", St, Ver);
+    St = CmdDb->GetVersion (CmdDb, "ldoc3", &Ver3);
+    AsciiSPrint (Line, sizeof (Line), "ldoc3 ver st=%r ver=0x%x", St, Ver3);
     Say (Line);
 
     Say ("calling GetAddress ldoc3");
-    Addr = 0;
-    St = CmdDb->GetAddress (CmdDb, "ldoc3", &Addr);
-    AsciiSPrint (Line, sizeof (Line), "ldoc3 addr st=%r addr=0x%x", St, Addr);
+    StA3 = CmdDb->GetAddress (CmdDb, "ldoc3", &Addr3);
+    AsciiSPrint (Line, sizeof (Line), "ldoc3 addr st=%r addr=0x%x", StA3, Addr3);
     Say (Line);
 
     Say ("calling GetVersion ldoc8");
-    Ver = 0;
-    St = CmdDb->GetVersion (CmdDb, "ldoc8", &Ver);
-    AsciiSPrint (Line, sizeof (Line), "ldoc8 ver st=%r ver=0x%x", St, Ver);
+    St = CmdDb->GetVersion (CmdDb, "ldoc8", &Ver8);
+    AsciiSPrint (Line, sizeof (Line), "ldoc8 ver st=%r ver=0x%x", St, Ver8);
     Say (Line);
 
     Say ("calling GetAddress ldoc8");
-    Addr = 0;
-    St = CmdDb->GetAddress (CmdDb, "ldoc8", &Addr);
-    AsciiSPrint (Line, sizeof (Line), "ldoc8 addr st=%r addr=0x%x", St, Addr);
+    StA8 = CmdDb->GetAddress (CmdDb, "ldoc8", &Addr8);
+    AsciiSPrint (Line, sizeof (Line), "ldoc8 addr st=%r addr=0x%x", StA8, Addr8);
     Say (Line);
   }
 
@@ -241,23 +248,38 @@ ProbeRun (
   if (!EFI_ERROR (St)) {
     AsciiSPrint (Line, sizeof (Line), "Rpmh rev=0x%x", Rpmh->Revision);
     Say (Line);
-    for (Idx = 0; Idx <= 2; Idx++) {
-      AsciiSPrint (Line, sizeof (Line), "calling CreateHandle drv=%u", Idx);
-      Say (Line);
-      Handle = NULL;
-      St = Rpmh->CreateHandle (Idx, "pmic", &Handle);
-      AsciiSPrint (Line, sizeof (Line), "CreateHandle drv=%u st=%r handle=%p", Idx, St, Handle);
-      Say (Line);
+
+    Say ("== SUMMARY ==");
+    AsciiSPrint (Line, sizeof (Line), "ldoc3 ver=0x%x addr st=%r addr=0x%x", Ver3, StA3, Addr3);
+    Say (Line);
+    AsciiSPrint (Line, sizeof (Line), "ldoc8 ver=0x%x addr st=%r addr=0x%x", Ver8, StA8, Addr8);
+    Say (Line);
+
+    DrvIdx = 0;
+    VarSize = sizeof (DrvIdx);
+    gRT->GetVariable (L"TscDrvIdx", &mTscVendorGuid, NULL, &VarSize, &DrvIdx);
+    if (DrvIdx >= 4) {
+      DrvIdx = 0;
     }
+    Idx = DrvIdx + 1;
+    gRT->SetVariable (
+           L"TscDrvIdx", &mTscVendorGuid,
+           EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS |
+           EFI_VARIABLE_NON_VOLATILE,
+           sizeof (Idx), &Idx
+           );
+    AsciiSPrint (Line, sizeof (Line), "trying CreateHandle drv=%u", DrvCandidates[DrvIdx]);
+    Say (Line);
+    Handle = NULL;
+    St = Rpmh->CreateHandle (DrvCandidates[DrvIdx], "pmic", &Handle);
+    AsciiSPrint (Line, sizeof (Line), "CreateHandle drv=%u st=%r handle=%p", DrvCandidates[DrvIdx], St, Handle);
+    Say (Line);
   }
 
   Say ("PROBE DONE");
   ProbeClose ();
   ProbeStoreVariable ();
 }
-
-STATIC EFI_GUID mTscVendorGuid =
-  { 0x1a799c27, 0x4f8f, 0x4bd1, { 0xae, 0x13, 0xcf, 0x36, 0xac, 0xf7, 0xdb, 0xf2 } };
 
 STATIC
 VOID
