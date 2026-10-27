@@ -21,11 +21,16 @@
   DebugLib
   PrintLib
   BaseLib
+  BaseMemoryLib
+  UefiRuntimeServicesTableLib
 
 [Protocols]
   gEfiRpmhProtocolGuid
   gEfiCmdDbProtocolGuid
   gEfiSimpleFileSystemProtocolGuid
+
+[Guids]
+  gEfiEventReadyToBootGuid
 
 [Depex]
   gEfiRpmhProtocolGuid AND gEfiCmdDbProtocolGuid

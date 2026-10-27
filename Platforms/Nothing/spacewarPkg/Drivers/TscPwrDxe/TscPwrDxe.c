@@ -30,7 +30,10 @@
 #include <Library/DebugLib.h>
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
+#include <Library/BaseMemoryLib.h>
 #include <Library/PrintLib.h>
+#include <Library/UefiRuntimeServicesTableLib.h>
+#include <Guid/EventGroup.h>
 #include "EFIRpmh.h"
 #include "EFICmdDb.h"
 #include <Protocol/SimpleFileSystem.h>
@@ -113,6 +116,9 @@ ProbeOpen (
 // the file always shows the last step that COMPLETED even if the
 // next call faults (UEFI has no observable console on this device).
 //
+STATIC CHAR8  gProbeBuf[2048];
+STATIC UINTN  gProbeLen;
+
 STATIC
 VOID
 ProbeLog (
@@ -122,10 +128,14 @@ ProbeLog (
   UINTN  Len;
   UINTN  Written;
 
+  Len = AsciiStrLen (Text);
+  if (gProbeLen + Len < sizeof (gProbeBuf)) {
+    CopyMem (gProbeBuf + gProbeLen, Text, Len);
+    gProbeLen += Len;
+  }
   if (gProbeFile == NULL) {
     return;
   }
-  Len = AsciiStrLen (Text);
   Written = Len;
   gProbeFile->Write (gProbeFile, &Written, Text);
   gProbeFile->Flush (gProbeFile);
@@ -147,11 +157,12 @@ ProbeClose (
   }
 }
 
-EFI_STATUS
-EFIAPI
-TscPwrDxeEntry (
-  IN EFI_HANDLE        ImageHandle,
-  IN EFI_SYSTEM_TABLE  *SystemTable
+STATIC VOID ProbeStoreVariable (VOID);
+
+STATIC
+VOID
+ProbeRun (
+  VOID
   )
 {
   EFI_CMDDB_PROTOCOL  *CmdDb;
@@ -164,9 +175,11 @@ TscPwrDxeEntry (
   VOID                *Handle;
 
   if (EFI_ERROR (ProbeOpen ())) {
-    return EFI_SUCCESS;
+    ProbeLog ("TscPwr probe v0.5 (ESP open failed)\n");
+    ProbeStoreVariable ();
+    return;
   }
-  ProbeLog ("TscPwr probe v0.4\n");
+  ProbeLog ("TscPwr probe v0.5\n");
 
   CmdDb = NULL;
   St = gBS->LocateProtocol (&gEfiCmdDbProtocolGuid, NULL, (VOID **)&CmdDb);
@@ -211,5 +224,66 @@ TscPwrDxeEntry (
 
   ProbeLog ("DONE\n");
   ProbeClose ();
-  return EFI_SUCCESS;
+  ProbeStoreVariable ();
+}
+
+//
+// The DXE dispatch order runs this driver before BDS connects the
+// storage stack, so at entry there are no SimpleFileSystem handles
+// yet (probe v0.4 booted cleanly but wrote nothing). All work is
+// therefore deferred to the ReadyToBoot event, when the ESP is
+// reachable and the DXE protocols are still alive. As a second
+// channel, the same text is stored in a UEFI variable.
+//
+STATIC EFI_GUID mTscVendorGuid =
+  { 0x1a799c27, 0x4f8f, 0x4bd1, { 0xae, 0x13, 0xcf, 0x36, 0xac, 0xf7, 0xdb, 0xf2 } };
+
+STATIC
+VOID
+ProbeStoreVariable (
+  VOID
+  )
+{
+  if (gProbeLen == 0) {
+    return;
+  }
+  gRT->SetVariable (
+         L"TscProbe",
+         &mTscVendorGuid,
+         EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS |
+         EFI_VARIABLE_NON_VOLATILE,
+         gProbeLen,
+         gProbeBuf
+         );
+}
+
+STATIC
+VOID
+EFIAPI
+ProbeOnReadyToBoot (
+  IN EFI_EVENT  Event,
+  IN VOID       *Context
+  )
+{
+  ProbeRun ();
+  gBS->CloseEvent (Event);
+}
+
+EFI_STATUS
+EFIAPI
+TscPwrDxeEntry (
+  IN EFI_HANDLE        ImageHandle,
+  IN EFI_SYSTEM_TABLE  *SystemTable
+  )
+{
+  EFI_EVENT  Event;
+
+  return gBS->CreateEventEx (
+                EVT_NOTIFY_SIGNAL,
+                TPL_CALLBACK,
+                ProbeOnReadyToBoot,
+                NULL,
+                &gEfiEventReadyToBootGuid,
+                &Event
+                );
 }
