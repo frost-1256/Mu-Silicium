@@ -6,7 +6,7 @@
   the chip never answers on SPI. End goal: vote both LDOs on during
   DXE via the EFI RPMH protocol (binary RpmhDxe), using CmdDb for
   the resource addresses — the same machinery the binary PmicDxeLa
-  uses. Protocol facts: Include/Protocol/EFIRpmh.h, EFICmdDb.h and
+  uses. Protocol facts: EFIRpmh.h / EFICmdDb.h (this directory) and
   winboot/UEFI_TOUCH_POWER_PLAN.md.
 
   THIS BUILD IS A PROBE (v0.2). It issues NO votes. It only:
@@ -30,8 +30,8 @@
 #include <Library/DebugLib.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/PrintLib.h>
-#include <Protocol/EFIRpmh.h>
-#include <Protocol/EFICmdDb.h>
+#include "EFIRpmh.h"
+#include "EFICmdDb.h"
 #include <Protocol/SimpleFileSystem.h>
 
 #define TSC_CMDDB_KEY(Name)  \

@@ -8,6 +8,8 @@
 
 [Sources]
   TscPwrDxe.c
+  EFIRpmh.h
+  EFICmdDb.h
 
 [Packages]
   MdePkg/MdePkg.dec
