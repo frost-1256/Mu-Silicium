@@ -3972,10 +3972,10 @@
 
 <img align="right" src="Resources/Pictures/Nothing-Phone-1.png" width="500" alt="Preview">
 
-**State:** Inactive <br>
+**State:** Active <br>
 **Codename:** spacewar
 
-**Contributors:** [Robotix](https://github.com/Robotix22/), [index986](https://github.com/index986/)
+**Contributors:** [Robotix](https://github.com/Robotix22/), [index986](https://github.com/index986/), [frost-1256](https://github.com/frost-1256/)
 
 ### UEFI Status
 
@@ -3990,6 +3990,48 @@
 | Mass Storage       | Unstable, Breaks on Large Transfers | ⚠️    |
 | Windows Boot       |                                     | ✅    |
 | Linux Boot         |                                     | ❌    |
+
+### OS Status
+
+<table>
+<tr><th>Windows</th></tr>
+<tr><td>
+
+> [!IMPORTANT]
+> Needs the Kodiak (SM7325) driver pack and a custom FT3680 touch driver.
+
+| Feature              | Description           | State |
+|:---------------------|:----------------------|:-----:|
+| Internal Storage     |                       | ✅    |
+| Side Buttons         |                       | ❔    |
+| Proximity Sensor     |                       | ❔    |
+| Light Sensor         |                       | ❔    |
+| Accelerometer Sensor |                       | ❔    |
+| Compass Sensor       |                       | ❔    |
+| Fingerprint Sensor   |                       | ❌    |
+| Hall Sensor          |                       | ❔    |
+| NFC Sensor           | I2C bus disabled (WHEA) | ❌    |
+| Temperature Sensor   |                       | ❔    |
+| Battery              |                       | ❔    |
+| USB Host Mode        | Controller not enumerated | ❌    |
+| USB Device Mode      |                       | ❔    |
+| USB Power Delivery   |                       | ❌    |
+| Charging             |                       | ❔    |
+| WLAN                 | WPSS starts, WLAN child never enumerates | ❌    |
+| CPU                  |                       | ✅    |
+| Touchscreen          | Custom FT3680 driver  | ✅    |
+| Bluetooth            |                       | ❌    |
+| GPS                  |                       | ❌    |
+| Speakers             |                       | ❔    |
+| Microphone           |                       | ❔    |
+| GPU                  | Basic display only    | ❌    |
+| Camera               |                       | ❌    |
+| Mobile Data          |                       | ❌    |
+| Display              |                       | ✅    |
+| Vibration            |                       | ❔    |
+
+</td></tr>
+</table>
 
 </details>
 
