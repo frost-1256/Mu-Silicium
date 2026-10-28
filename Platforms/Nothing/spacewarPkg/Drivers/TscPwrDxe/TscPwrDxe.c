@@ -455,7 +455,7 @@ ProbeRun (
             Set.E[N].Pad[0] = Set.E[N].Pad[1] = Set.E[N].Pad[2] = 0; N++;
           }
           Set.Count = N;
-          Say (Variants[Vi].Label);
+          Say ((CHAR8 *)Variants[Vi].Label);
           Result = -1;
           St = Rpmh->IssueSet (Handle, (RPMH_REQUEST_SET *)&Set, &Result);
           AsciiSPrint (Line, sizeof (Line), "  -> st=%r result=%d", St, Result);
