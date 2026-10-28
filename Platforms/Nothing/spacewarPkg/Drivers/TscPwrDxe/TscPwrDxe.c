@@ -204,9 +204,6 @@ ProbeRun (
   UINT32               Addr3, Addr8;
   UINT16               Ver3, Ver8;
   EFI_STATUS           StA3, StA8;
-  UINT32               DrvIdx;
-  UINTN                VarSize;
-  STATIC UINT32        DrvCandidates[4] = { 1, 2, 3, 4 };
 
   Addr3 = Addr8 = 0; Ver3 = Ver8 = 0; StA3 = StA8 = EFI_NOT_FOUND;
 
