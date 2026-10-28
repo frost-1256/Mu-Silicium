@@ -201,7 +201,6 @@ ProbeRun (
   CHAR8                Line[256];
   EFI_STATUS           St;
   UINT32               Idx;
-  VOID                *Handle;
   UINT32               Addr3, Addr8;
   UINT16               Ver3, Ver8;
   EFI_STATUS           StA3, StA8;
