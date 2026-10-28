@@ -189,6 +189,7 @@ STATIC EFI_GUID mTscVendorGuid =
   { 0x1a799c27, 0x4f8f, 0x4bd1, { 0xae, 0x13, 0xcf, 0x36, 0xac, 0xf7, 0xdb, 0xf2 } };
 
 STATIC VOID ProbeStoreVariable (VOID);
+STATIC VOID UefiTouchCheck (IN CHAR8 *Label);
 
 STATIC
 VOID
