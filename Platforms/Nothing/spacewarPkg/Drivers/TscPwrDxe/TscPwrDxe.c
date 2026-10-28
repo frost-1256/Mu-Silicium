@@ -207,7 +207,7 @@ ProbeRun (
 
   Addr3 = Addr8 = 0; Ver3 = Ver8 = 0; StA3 = StA8 = EFI_NOT_FOUND;
 
-  Say ("TscPwr probe v1.4 - staged");
+  Say ("TscPwr probe v1.5 - staged");
   ProbeOpen ();
 
   CmdDb = NULL;
@@ -421,6 +421,7 @@ ProbeRun (
           AsciiSPrint (Line, sizeof (Line), "LATE IssueSet st=%r result=%d", St, Result);
           Say (Line);
           gBS->Stall (500000);
+          UefiTouchCheck ("LATE");
         }
         if (Fa5 != NULL) {
           Read = (FA5_READ)((VOID **)Fa5)[1];
@@ -474,6 +475,202 @@ VoteNotify (
 {
   ProbeRun ();
   gBS->CloseEvent (Event);
+}
+
+//
+// v1.5: UEFI-side FT3680 check — a direct port of the Windows
+// driver's TLMM bit-bang + framed boot-ID read (Gpio.c/Spb.c/
+// Ft3680.c in ft3680-driver/). After a vote, power-cycle the
+// chip (GPIO105 reset) and ask for its boot ID over bit-banged
+// SPI (MOSI 52, MISO 53, CLK 54, CS 55; TLMM window at physical
+// 0x0F100000). If the chip answers here, the rails are live in
+// UEFI and the loss happens at the OS handoff; if it stays
+// silent, the vote never lands electrically.
+//
+#define TSC_TLMM_BASE   0x0F100000
+#define TSC_PIN_CTL(P)  ((volatile UINT32 *)(UINTN)(TSC_TLMM_BASE + (P) * 0x1000))
+#define TSC_PIN_IO(P)   ((volatile UINT32 *)(UINTN)(TSC_TLMM_BASE + (P) * 0x1000 + 4))
+
+STATIC
+VOID
+TscPinConfig (
+  IN UINT32  Pin,
+  IN BOOLEAN Oe
+  )
+{
+  UINT32  V = *TSC_PIN_CTL (Pin);
+  V &= ~(0xFu << 2);
+  if (Oe) {
+    V |= (1u << 9);
+  } else {
+    V &= ~(1u << 9);
+  }
+  *TSC_PIN_CTL (Pin) = V;
+}
+
+STATIC
+VOID
+TscPinWrite (
+  IN UINT32   Pin,
+  IN BOOLEAN  Value
+  )
+{
+  UINT32  V = *TSC_PIN_IO (Pin);
+  if (Value) {
+    V |= (1u << 1);
+  } else {
+    V &= ~(1u << 1);
+  }
+  *TSC_PIN_IO (Pin) = V;
+}
+
+STATIC
+BOOLEAN
+TscPinRead (
+  IN UINT32  Pin
+  )
+{
+  return (*TSC_PIN_IO (Pin) & 1u) != 0;
+}
+
+STATIC
+UINT8
+TscShiftByte (
+  IN UINT8  Out
+  )
+{
+  UINT8  In = 0;
+  INT32  Bit;
+  for (Bit = 7; Bit >= 0; Bit--) {
+    TscPinWrite (52, (BOOLEAN)((Out >> Bit) & 1));
+    gBS->Stall (3);
+    TscPinWrite (54, TRUE);
+    gBS->Stall (3);
+    if (TscPinRead (53)) {
+      In |= (UINT8)(1 << Bit);
+    }
+    TscPinWrite (54, FALSE);
+    gBS->Stall (3);
+  }
+  return In;
+}
+
+STATIC
+VOID
+TscSpiTransfer (
+  IN OUT UINT8  *Buf,
+  IN UINTN       Len,
+  IN BOOLEAN     Read
+  )
+{
+  UINTN  I;
+  TscPinWrite (55, FALSE);
+  gBS->Stall (3);
+  for (I = 0; I < Len; I++) {
+    UINT8  R = TscShiftByte (Read ? 0x00 : Buf[I]);
+    if (Read) {
+      Buf[I] = R;
+    }
+  }
+  TscPinWrite (54, FALSE);
+  TscPinWrite (55, TRUE);
+  gBS->Stall (150);
+}
+
+STATIC
+VOID
+TscSpiReadFrame (
+  IN UINT8   *Head,
+  IN UINTN    HeadLen,
+  IN UINT8   *Rx,
+  IN UINTN    RxLen
+  )
+{
+  UINTN  I;
+  TscPinWrite (55, FALSE);
+  gBS->Stall (3);
+  for (I = 0; I < HeadLen; I++) {
+    (VOID)TscShiftByte (Head[I]);
+  }
+  for (I = 0; I < RxLen; I++) {
+    Rx[I] = TscShiftByte (0x00);
+  }
+  TscPinWrite (54, FALSE);
+  TscPinWrite (55, TRUE);
+  gBS->Stall (150);
+}
+
+STATIC
+UINT16
+TscCrcKermit (
+  IN UINT8  *Data,
+  IN UINTN   Len
+  )
+{
+  UINT16  Crc = 0xFFFF;
+  UINTN   I;
+  INT32   Bit;
+  for (I = 0; I < Len; I++) {
+    Crc = (UINT16)(Crc ^ Data[I]);
+    for (Bit = 0; Bit < 8; Bit++) {
+      Crc = (Crc & 1) ? (UINT16)((Crc >> 1) ^ 0x8408) : (UINT16)(Crc >> 1);
+    }
+  }
+  return Crc;
+}
+
+STATIC
+VOID
+UefiTouchCheck (
+  IN CHAR8  *Label
+  )
+{
+  CHAR8   Line[160];
+  UINT8   Frame[8];
+  UINT8   Head[7];
+  UINT8   Rx[4];
+  UINT32  Attempt;
+  UINT16  Calc, Read;
+
+  TscPinConfig (52, TRUE);
+  TscPinConfig (53, FALSE);
+  TscPinConfig (54, TRUE);
+  TscPinConfig (55, TRUE);
+  TscPinConfig (105, TRUE);
+  TscPinWrite (54, FALSE);
+  TscPinWrite (55, TRUE);
+
+  /* reset pulse: low 10 ms, high, 250 ms settle */
+  TscPinWrite (105, FALSE);
+  gBS->Stall (10000);
+  TscPinWrite (105, TRUE);
+  gBS->Stall (250000);
+
+  for (Attempt = 0; Attempt < 3; Attempt++) {
+    /* framed write of the start command {0x55, 0xAA} */
+    Frame[0] = 0x55; Frame[1] = 0x00; Frame[2] = 0x00; Frame[3] = 0x01;
+    Frame[4] = 0x00; Frame[5] = 0x00; Frame[6] = 0x00; Frame[7] = 0xAA;
+    TscSpiTransfer (Frame, 8, FALSE);
+    gBS->Stall (12000);
+    /* framed read of register 0x90, 2 data bytes + CRC16 */
+    Head[0] = 0x90; Head[1] = 0xA0; Head[2] = 0x00; Head[3] = 0x02;
+    Head[4] = 0x00; Head[5] = 0x00; Head[6] = 0x00;
+    Rx[0] = Rx[1] = Rx[2] = Rx[3] = 0;
+    TscSpiReadFrame (Head, 7, Rx, 4);
+    Calc = TscCrcKermit (Rx, 2);
+    Read = (UINT16)((Rx[3] << 8) | Rx[2]);
+    AsciiSPrint (Line, sizeof (Line),
+      "%a bootid %u: raw %02X %02X %02X %02X calc %04X read %04X",
+      Label, Attempt, Rx[0], Rx[1], Rx[2], Rx[3], Calc, Read);
+    Say (Line);
+    if (Calc == Read && Rx[0] != 0 && Rx[1] != 0) {
+      AsciiSPrint (Line, sizeof (Line), "%a: CHIP ALIVE id %02X %02X", Label, Rx[0], Rx[1]);
+      Say (Line);
+      return;
+    }
+  }
+  AsciiSPrint (Line, sizeof (Line), "%a: chip silent", Label);
+  Say (Line);
 }
 
 //
@@ -547,6 +744,8 @@ EarlyVote (
   St = Rpmh->IssueSet (Handle, (RPMH_REQUEST_SET *)&Set, &Result);
   AsciiSPrint (Line, sizeof (Line), "EARLY IssueSet st=%r result=%d", St, Result);
   Say (Line);
+  gBS->Stall (500000);
+  UefiTouchCheck ("EARLY");
 }
 
 EFI_STATUS
