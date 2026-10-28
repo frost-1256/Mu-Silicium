@@ -210,7 +210,7 @@ ProbeRun (
 
   Addr3 = Addr8 = 0; Ver3 = Ver8 = 0; StA3 = StA8 = EFI_NOT_FOUND;
 
-  Say ("TscPwr probe v0.7 - staged");
+  Say ("TscPwr probe v0.8 - staged");
   ProbeOpen ();
 
   CmdDb = NULL;
@@ -253,25 +253,24 @@ ProbeRun (
     AsciiSPrint (Line, sizeof (Line), "ldoc8 ver=0x%x addr st=%r addr=0x%x", Ver8, StA8, Addr8);
     Say (Line);
 
-    DrvIdx = 0;
-    VarSize = sizeof (DrvIdx);
-    gRT->GetVariable (L"TscDrvIdx", &mTscVendorGuid, NULL, &VarSize, &DrvIdx);
-    if (DrvIdx >= 4) {
-      DrvIdx = 0;
+    //
+    // NV variables do not persist on this platform build (the
+    // v0.7 rotation repeated drv=1 on the second boot), so try
+    // the remaining candidates in one boot, in order. A candidate
+    // that trips RpmhDxe's broken error path kills the boot --
+    // the "trying" line for it is the data point in that case.
+    //
+    for (Idx = 0; Idx < 3; Idx++) {
+      AsciiSPrint (Line, sizeof (Line), "trying CreateHandle drv=%u", Idx + 2);
+      Say (Line);
+      Handle = NULL;
+      St = Rpmh->CreateHandle (Idx + 2, "pmic", &Handle);
+      AsciiSPrint (Line, sizeof (Line), "CreateHandle drv=%u st=%r handle=%p", Idx + 2, St, Handle);
+      Say (Line);
+      if (!EFI_ERROR (St)) {
+        break;
+      }
     }
-    Idx = DrvIdx + 1;
-    gRT->SetVariable (
-           L"TscDrvIdx", &mTscVendorGuid,
-           EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS |
-           EFI_VARIABLE_NON_VOLATILE,
-           sizeof (Idx), &Idx
-           );
-    AsciiSPrint (Line, sizeof (Line), "trying CreateHandle drv=%u", DrvCandidates[DrvIdx]);
-    Say (Line);
-    Handle = NULL;
-    St = Rpmh->CreateHandle (DrvCandidates[DrvIdx], "pmic", &Handle);
-    AsciiSPrint (Line, sizeof (Line), "CreateHandle drv=%u st=%r handle=%p", DrvCandidates[DrvIdx], St, Handle);
-    Say (Line);
   }
 
   Say ("PROBE DONE");
