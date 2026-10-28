@@ -207,7 +207,7 @@ ProbeRun (
 
   Addr3 = Addr8 = 0; Ver3 = Ver8 = 0; StA3 = StA8 = EFI_NOT_FOUND;
 
-  Say ("TscPwr probe v1.3 - staged");
+  Say ("TscPwr probe v1.4 - staged");
   ProbeOpen ();
 
   CmdDb = NULL;
@@ -373,18 +373,16 @@ ProbeRun (
       }
 
       //
-      // v1.2 result: IssueSet(Flag=0, volt+en, entry flags 1)
-      // returned st=Success but Result=1 and the rails stayed at
-      // 0 (FA5 readback + Windows driver both confirm). PmicDxeLa's
-      // append code (0x16300) shows three header/entry-flag combos
-      // in real use: (0,1), (2,0), (1,0). v1.3 tries a matrix of
-      // variants in one boot and reports each Result, isolating
-      // whether the rejection is about the set header, the entry
-      // mix, or the handle: volt-only, en-only, volt+en+mode(HPM=7
-      // for pmic5 LDOs, addr+8), Flag=1/entry 0, Flag=2/entry 0,
-      // and the full set on a handle created with the name "pmic"
-      // (the exact name PmicDxeLa uses), in case the RPMh core
-      // keys clients by name.
+      // v1.3 matrix results: hdr1/hdr2 sets only queue commands
+      // in RpmhDxe's core (Flag != 0 path appends to a pending
+      // list and returns 0 unsent); hdr0 sets reach the real TCS
+      // send, which returned 1. The trailing hdr0 repeat returned
+      // 0 via the core's "redundant commands" short circuit, not
+      // via a successful send. So the open question is the TCS
+      // send itself. v1.4 issues the single canonical set
+      // (hdr0/ent1, name "pmic") here at ReadyToBoot (EarlyVote
+      // in the entry point already issued it at DXE dispatch) so
+      // both timings can be compared in one boot.
       //
       if (Rpmh != NULL && Addr3 != 0 && Addr8 != 0 &&
           StepsV[3] != 0 && StepsV[8] != 0) {
@@ -397,72 +395,33 @@ ProbeRun (
             UINT32  Data;
             UINT8   Flag;
             UINT8   Pad[3];
-          } E[6];
+          } E[4];
         } Set;
         VOID   *Handle;
         INT32   Result;
-        UINT32  Vi;
 
-        STATIC CONST struct {
-          CONST CHAR8  *Label;
-          UINT32        HdrFlag;
-          UINT8         EntFlag;
-          UINT32        Kind;   // 0=volt, 1=en, 2=volt+en, 3=volt+en+mode
-          CONST CHAR8  *Name;
-        } Variants[6] = {
-          { "V-A volt-only hdr0/ent1",       0, 1, 0, "tscpwr" },
-          { "V-B en-only hdr0/ent1",         0, 1, 1, "tscpwr" },
-          { "V-C volt+en+mode hdr0/ent1",    0, 1, 3, "tscpwr" },
-          { "V-D volt+en hdr1/ent0",         1, 0, 2, "tscpwr" },
-          { "V-E volt+en hdr2/ent0",         2, 0, 2, "tscpwr" },
-          { "V-F volt+en hdr0/ent1 'pmic'",  0, 1, 2, "pmic"   },
-        };
-
-        for (Vi = 0; Vi < 6; Vi++) {
-          UINT32  N;
-
-          Handle = NULL;
-          Rpmh->CreateHandle (2, (CHAR8 *)Variants[Vi].Name, &Handle);
-          if (Handle == NULL) {
-            Say ("variant: no handle");
-            continue;
-          }
-          Set.Flag = Variants[Vi].HdrFlag;
+        Handle = NULL;
+        Rpmh->CreateHandle (2, "pmic", &Handle);
+        AsciiSPrint (Line, sizeof (Line), "LATE handle=%p", Handle);
+        Say (Line);
+        if (Handle != NULL) {
+          Set.Flag = 0;
+          Set.Count = 4;
           Set.Reserved = 0;
-          N = 0;
-          if (Variants[Vi].Kind == 0 || Variants[Vi].Kind >= 2) {
-            Set.E[N].Address = Addr3; Set.E[N].Data = StepsV[3];
-            Set.E[N].Flag = Variants[Vi].EntFlag;
-            Set.E[N].Pad[0] = Set.E[N].Pad[1] = Set.E[N].Pad[2] = 0; N++;
-            Set.E[N].Address = Addr8; Set.E[N].Data = StepsV[8];
-            Set.E[N].Flag = Variants[Vi].EntFlag;
-            Set.E[N].Pad[0] = Set.E[N].Pad[1] = Set.E[N].Pad[2] = 0; N++;
-          }
-          if (Variants[Vi].Kind == 1 || Variants[Vi].Kind >= 2) {
-            Set.E[N].Address = Addr3 + 4; Set.E[N].Data = 1;
-            Set.E[N].Flag = Variants[Vi].EntFlag;
-            Set.E[N].Pad[0] = Set.E[N].Pad[1] = Set.E[N].Pad[2] = 0; N++;
-            Set.E[N].Address = Addr8 + 4; Set.E[N].Data = 1;
-            Set.E[N].Flag = Variants[Vi].EntFlag;
-            Set.E[N].Pad[0] = Set.E[N].Pad[1] = Set.E[N].Pad[2] = 0; N++;
-          }
-          if (Variants[Vi].Kind == 3) {
-            Set.E[N].Address = Addr3 + 8; Set.E[N].Data = 7;
-            Set.E[N].Flag = Variants[Vi].EntFlag;
-            Set.E[N].Pad[0] = Set.E[N].Pad[1] = Set.E[N].Pad[2] = 0; N++;
-            Set.E[N].Address = Addr8 + 8; Set.E[N].Data = 7;
-            Set.E[N].Flag = Variants[Vi].EntFlag;
-            Set.E[N].Pad[0] = Set.E[N].Pad[1] = Set.E[N].Pad[2] = 0; N++;
-          }
-          Set.Count = N;
-          Say ((CHAR8 *)Variants[Vi].Label);
+          Set.E[0].Address = Addr3;     Set.E[0].Data = StepsV[3];
+          Set.E[0].Flag = 1;            Set.E[0].Pad[0] = Set.E[0].Pad[1] = Set.E[0].Pad[2] = 0;
+          Set.E[1].Address = Addr3 + 4; Set.E[1].Data = 1;
+          Set.E[1].Flag = 1;            Set.E[1].Pad[0] = Set.E[1].Pad[1] = Set.E[1].Pad[2] = 0;
+          Set.E[2].Address = Addr8;     Set.E[2].Data = StepsV[8];
+          Set.E[2].Flag = 1;            Set.E[2].Pad[0] = Set.E[2].Pad[1] = Set.E[2].Pad[2] = 0;
+          Set.E[3].Address = Addr8 + 4; Set.E[3].Data = 1;
+          Set.E[3].Flag = 1;            Set.E[3].Pad[0] = Set.E[3].Pad[1] = Set.E[3].Pad[2] = 0;
           Result = -1;
           St = Rpmh->IssueSet (Handle, (RPMH_REQUEST_SET *)&Set, &Result);
-          AsciiSPrint (Line, sizeof (Line), "  -> st=%r result=%d", St, Result);
+          AsciiSPrint (Line, sizeof (Line), "LATE IssueSet st=%r result=%d", St, Result);
           Say (Line);
-          gBS->Stall (300000);
+          gBS->Stall (500000);
         }
-
         if (Fa5 != NULL) {
           Read = (FA5_READ)((VOID **)Fa5)[1];
           Payload = 0;
@@ -474,7 +433,7 @@ ProbeRun (
           AsciiSPrint (Line, sizeof (Line), "ldo8 now steps=%u st=%r", Payload, St);
           Say (Line);
         }
-        Say ("VOTE MATRIX DONE");
+        Say ("VOTE DONE");
       } else {
         Say ("VOTE SKIPPED (missing inputs)");
       }
@@ -517,6 +476,79 @@ VoteNotify (
   gBS->CloseEvent (Event);
 }
 
+//
+// v1.4: the same canonical vote as ProbeRun issues at
+// ReadyToBoot, but fired at DXE dispatch time. The RpmhDxe
+// core's low-level TCS send is the current suspect (it returned
+// 1 for every real send at ReadyToBoot); the RSC/TCS state this
+// early — before the rest of the platform drivers run — may
+// differ. Voltages are the known mV values for ldoc3/ldoc8.
+//
+STATIC
+VOID
+EarlyVote (
+  VOID
+  )
+{
+  EFI_CMDDB_PROTOCOL  *CmdDb;
+  EFI_RPMH_PROTOCOL   *Rpmh;
+  EFI_STATUS           St;
+  UINT32               Addr3, Addr8;
+  CHAR8                Line[128];
+  VOID                *Handle;
+  INT32                Result;
+  struct {
+    UINT32  Flag;
+    UINT32  Count;
+    UINT32  Reserved;
+    struct {
+      UINT32  Address;
+      UINT32  Data;
+      UINT8   Flag;
+      UINT8   Pad[3];
+    } E[4];
+  } Set;
+
+  Say ("EARLY vote at DXE entry");
+  CmdDb = NULL;
+  Rpmh = NULL;
+  Addr3 = Addr8 = 0;
+  if (EFI_ERROR (gBS->LocateProtocol (&gEfiCmdDbProtocolGuid, NULL, (VOID **)&CmdDb)) ||
+      EFI_ERROR (gBS->LocateProtocol (&gEfiRpmhProtocolGuid, NULL, (VOID **)&Rpmh))) {
+    Say ("EARLY: protocol locate failed");
+    return;
+  }
+  CmdDb->GetAddress (CmdDb, "ldoc3", &Addr3);
+  CmdDb->GetAddress (CmdDb, "ldoc8", &Addr8);
+  AsciiSPrint (Line, sizeof (Line), "EARLY addr3=0x%x addr8=0x%x", Addr3, Addr8);
+  Say (Line);
+  if (Addr3 == 0 || Addr8 == 0) {
+    return;
+  }
+  Handle = NULL;
+  Rpmh->CreateHandle (2, "pmic", &Handle);
+  AsciiSPrint (Line, sizeof (Line), "EARLY handle=%p", Handle);
+  Say (Line);
+  if (Handle == NULL) {
+    return;
+  }
+  Set.Flag = 0;
+  Set.Count = 4;
+  Set.Reserved = 0;
+  Set.E[0].Address = Addr3;     Set.E[0].Data = 2800;
+  Set.E[0].Flag = 1;            Set.E[0].Pad[0] = Set.E[0].Pad[1] = Set.E[0].Pad[2] = 0;
+  Set.E[1].Address = Addr3 + 4; Set.E[1].Data = 1;
+  Set.E[1].Flag = 1;            Set.E[1].Pad[0] = Set.E[1].Pad[1] = Set.E[1].Pad[2] = 0;
+  Set.E[2].Address = Addr8;     Set.E[2].Data = 1800;
+  Set.E[2].Flag = 1;            Set.E[2].Pad[0] = Set.E[2].Pad[1] = Set.E[2].Pad[2] = 0;
+  Set.E[3].Address = Addr8 + 4; Set.E[3].Data = 1;
+  Set.E[3].Flag = 1;            Set.E[3].Pad[0] = Set.E[3].Pad[1] = Set.E[3].Pad[2] = 0;
+  Result = -1;
+  St = Rpmh->IssueSet (Handle, (RPMH_REQUEST_SET *)&Set, &Result);
+  AsciiSPrint (Line, sizeof (Line), "EARLY IssueSet st=%r result=%d", St, Result);
+  Say (Line);
+}
+
 EFI_STATUS
 EFIAPI
 TscPwrDxeEntry (
@@ -534,9 +566,11 @@ TscPwrDxeEntry (
   // v1.2: even at ReadyToBoot the FA5 write faults (arbiter TX
   // window) while reads succeed; the votes go through RPMh
   // IssueSet instead (see the vote block in ProbeRun).
-  // v1.3: IssueSet accepted the call but Result=1 and the rails
-  // stayed off — the vote block now runs a variant matrix.
+  // v1.3: variant matrix — hdr1/hdr2 only queue, hdr0 sends
+  // fail with Result=1. v1.4: also fire the vote at DXE entry
+  // (EarlyVote above) to compare TCS-send behaviour by timing.
   //
+  EarlyVote ();
   return gBS->CreateEventEx (
                 EVT_NOTIFY_SIGNAL,
                 TPL_CALLBACK,
