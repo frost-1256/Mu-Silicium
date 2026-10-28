@@ -4003,7 +4003,7 @@
 | Feature              | Description           | State |
 |:---------------------|:----------------------|:-----:|
 | Internal Storage     |                       | ✅    |
-| Side Buttons         |                       | ❔    |
+| Side Buttons         |                       | ✅    |
 | Proximity Sensor     |                       | ❔    |
 | Light Sensor         |                       | ❔    |
 | Accelerometer Sensor |                       | ❔    |
