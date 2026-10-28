@@ -207,7 +207,7 @@ ProbeRun (
 
   Addr3 = Addr8 = 0; Ver3 = Ver8 = 0; StA3 = StA8 = EFI_NOT_FOUND;
 
-  Say ("TscPwr probe v0.9 - staged");
+  Say ("TscPwr probe v1.0 - staged");
   ProbeOpen ();
 
   CmdDb = NULL;
@@ -251,14 +251,14 @@ ProbeRun (
     Say (Line);
 
     //
-    // v0.9: runtime introspection (READ-ONLY, no hardware writes).
+    // v1.0: runtime table readout + the actual votes.
     // PmicDxeLa's per-PMIC tables are runtime-populated, so read
-    // them out of its loaded image: find the image whose .data
-    // GUID slot (RVA 0x20018) equals PmicDxeLa's FILE_GUID, then
-    // walk table[2] (pm8350c) -> info -> range entries 3 and 8,
-    // and mirror the exact FA5F306B call tuples its pm_ldo
-    // workers would build (voltage: cmd 2, steps payload;
-    // enable: cmd 1, 0x80 payload).
+    // them out of its loaded image (FILE_GUID slot at RVA
+    // 0x20018), walk table[2] (pm8350c) for the ldoc3/ldoc8 range
+    // entries, then issue the exact FA5F306B write calls its
+    // pm_ldo workers build: voltage first (cmd 2, steps payload),
+    // then enable (cmd 1, payload byte 0x80). All values are
+    // recomputed from the live tables, nothing hardcoded.
     //
     {
       EFI_LOADED_IMAGE_PROTOCOL  *Img;
@@ -267,8 +267,16 @@ ProbeRun (
       UINT8                      *LaBase;
       UINT8                      *Info, *Ctx, *Sub, *RangeTab, *Entry;
       UINT32                      Count, Arg0, Min, Max, Step;
-      UINT16                      ResV, ResE;
+      UINT16                      ResV[9], ResE[9];
+      UINT32                      StepsV[9], TargetUv;
       VOID                       *Fa5;
+      VOID                       *Fa5Cached;
+
+      typedef EFI_STATUS (EFIAPI *FA5_WRITE)(
+        VOID *This, UINT32 Arg0, UINT32 One, UINT32 ResId,
+        UINT32 *Payload, UINT32 Cmd);
+      FA5_WRITE  Write;
+      UINT32     Payload;
 
       STATIC EFI_GUID  LaGuid = { 0x5776232E, 0x082D, 0x4B75, { 0x9A, 0x0E, 0xFE, 0x1D, 0x13, 0xF7, 0xA5, 0xD9 } };
       STATIC EFI_GUID  Fa5Guid = { 0xFA5F306B, 0xF47D, 0x4AC4, { 0xA4, 0x7D, 0x88, 0x2F, 0x82, 0x04, 0xEC, 0x30 } };
@@ -299,6 +307,9 @@ ProbeRun (
       AsciiSPrint (Line, sizeof (Line), "PmicDxeLa base=%p", LaBase);
       Say (Line);
 
+      ResV[3] = ResV[8] = ResE[3] = ResE[8] = 0;
+      StepsV[3] = StepsV[8] = 0;
+      Arg0 = 0;
       if (LaBase != NULL) {
         Say ("I2: reading pmic table[2]");
         Info = *(UINT8 **)(LaBase + 0x21CD0 + 2 * sizeof (VOID *));
@@ -318,22 +329,24 @@ ProbeRun (
               Min = *(UINT32 *)Entry;
               Max = *(UINT32 *)(Entry + 4);
               Step = *(UINT32 *)(Entry + 8);
-              ResV = *(UINT16 *)(Sub + 0xC) + *(UINT16 *)(Entry + 0xC);
-              ResE = *(UINT16 *)(Sub + 0x16) + *(UINT16 *)(Entry + 0xC);
+              TargetUv = (Idx == 3) ? 2800000 : 1800000;
+              ResV[Idx] = *(UINT16 *)(Sub + 0xC) + *(UINT16 *)(Entry + 0xC);
+              ResE[Idx] = *(UINT16 *)(Sub + 0x16) + *(UINT16 *)(Entry + 0xC);
+              StepsV[Idx] = (Step != 0 && TargetUv >= Min && TargetUv <= Max)
+                            ? (TargetUv - Min) / Step : 0;
               AsciiSPrint (Line, sizeof (Line),
                 "ldo%u min=%u max=%u step=%u valid=%u type=%u",
                 Idx, Min, Max, Step, Entry[0xE], Entry[0x10]);
               Say (Line);
               AsciiSPrint (Line, sizeof (Line),
                 "ldo%u resV=0x%x resE=0x%x steps(%u)=%u",
-                Idx, ResV, ResE,
-                (Idx == 3) ? 2800000 : 1800000,
-                (Step != 0) ? (((Idx == 3) ? 2800000 : 1800000) - Min) / Step : 0);
+                Idx, ResV[Idx], ResE[Idx], TargetUv, StepsV[Idx]);
               Say (Line);
             }
           }
         }
-        AsciiSPrint (Line, sizeof (Line), "FA5 cached=%p", *(VOID **)(LaBase + 0x22580));
+        Fa5Cached = *(VOID **)(LaBase + 0x22580);
+        AsciiSPrint (Line, sizeof (Line), "FA5 cached=%p", Fa5Cached);
         Say (Line);
       }
 
@@ -342,10 +355,27 @@ ProbeRun (
       St = gBS->LocateProtocol (&Fa5Guid, NULL, &Fa5);
       AsciiSPrint (Line, sizeof (Line), "FA5 locate st=%r ptr=%p", St, Fa5);
       Say (Line);
-      if (Fa5 != NULL) {
-        AsciiSPrint (Line, sizeof (Line), "FA5 m08=%p m10=%p m18=%p",
-          ((VOID **)Fa5)[1], ((VOID **)Fa5)[2], ((VOID **)Fa5)[3]);
-        Say (Line);
+
+      if (Fa5 != NULL && StepsV[3] != 0 && StepsV[8] != 0) {
+        Write = (FA5_WRITE)((VOID **)Fa5)[2];
+        for (Idx = 3; Idx <= 8; Idx += 5) {
+          AsciiSPrint (Line, sizeof (Line), "VOTE ldo%u voltage steps=%u", Idx, StepsV[Idx]);
+          Say (Line);
+          Payload = StepsV[Idx];
+          St = Write (Fa5, Arg0, 1, ResV[Idx], &Payload, 2);
+          AsciiSPrint (Line, sizeof (Line), "ldo%u voltage st=%r", Idx, St);
+          Say (Line);
+
+          AsciiSPrint (Line, sizeof (Line), "VOTE ldo%u enable", Idx);
+          Say (Line);
+          Payload = 0x80;
+          St = Write (Fa5, Arg0, 1, ResE[Idx], &Payload, 1);
+          AsciiSPrint (Line, sizeof (Line), "ldo%u enable st=%r", Idx, St);
+          Say (Line);
+        }
+        Say ("VOTES ISSUED");
+      } else {
+        Say ("VOTE SKIPPED (missing inputs)");
       }
     }
   }
