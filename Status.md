@@ -4008,27 +4008,27 @@
 | Light Sensor         |                       | ❔    |
 | Accelerometer Sensor |                       | ❔    |
 | Compass Sensor       |                       | ❔    |
-| Fingerprint Sensor   |                       | ❌    |
+| Fingerprint Sensor   | No driver/TA path exists (Goodix, TEE-signed) | ❌    |
 | Hall Sensor          |                       | ❔    |
 | NFC Sensor           | I2C bus disabled (WHEA) | ❌    |
 | Temperature Sensor   |                       | ❔    |
-| Battery              |                       | ❔    |
-| USB Host Mode        | Controller not enumerated | ❌    |
+| Battery              | ACPI _STA fixed; pack drivers not staged yet | ❔    |
+| USB Host Mode        | Role switch proven via UCSI; blocked by touch rail issue | ❌    |
 | USB Device Mode      |                       | ❔    |
-| USB Power Delivery   |                       | ❌    |
+| USB Power Delivery   | UCSI enumerates; blocked by touch rail issue | ❌    |
 | Charging             |                       | ❔    |
-| WLAN                 | WPSS starts, WLAN child never enumerates | ❌    |
+| WLAN                 | WPSS fails to start (Problem 31, STATUS_NOT_FOUND); native FW swap no change | ❌    |
 | CPU                  |                       | ✅    |
 | Touchscreen          | Custom FT3680 driver  | ✅    |
-| Bluetooth            |                       | ❌    |
-| GPS                  |                       | ❌    |
-| Speakers             |                       | ❔    |
+| Bluetooth            | Binds, but starting it drops the touch power rails | ❌    |
+| GPS                  | Depends on modem firmware | ❌    |
+| Speakers             | No driver for the TFA9873 amps; no ACPI node for their I2C bus | ❌    |
 | Microphone           |                       | ❔    |
-| GPU                  | Basic display only    | ❌    |
-| Camera               |                       | ❌    |
-| Mobile Data          |                       | ❌    |
+| GPU                  | Enumerates (Basic Display). QCDX KMD starts but panel stays dark; blocked by touch rail issue | ❌    |
+| Camera               | No sensor drivers in the pack (IMX766 / S5KJN1 / IMX471) | ❌    |
+| Mobile Data          | Feasible (works on lisa); cellular stack not staged yet | ❌    |
 | Display              |                       | ✅    |
-| Vibration            |                       | ❔    |
+| Vibration            | Haptics driver in pack, not staged; ACPI node disabled | ❔    |
 
 </td></tr>
 </table>
