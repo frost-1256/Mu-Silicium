@@ -190,6 +190,7 @@ STATIC EFI_GUID mTscVendorGuid =
 
 STATIC VOID ProbeStoreVariable (VOID);
 STATIC VOID UefiTouchCheck (IN CHAR8 *Label);
+STATIC VOID RscVote (IN CHAR8 *Label);
 
 STATIC
 VOID
@@ -197,251 +198,11 @@ ProbeRun (
   VOID
   )
 {
-  EFI_CMDDB_PROTOCOL  *CmdDb;
-  EFI_RPMH_PROTOCOL   *Rpmh;
-  CHAR8                Line[256];
-  EFI_STATUS           St;
-  UINT32               Idx;
-  UINT32               Addr3, Addr8;
-  UINT16               Ver3, Ver8;
-  EFI_STATUS           StA3, StA8;
-
-  Addr3 = Addr8 = 0; Ver3 = Ver8 = 0; StA3 = StA8 = EFI_NOT_FOUND;
-
-  Say ("TscPwr probe v1.5 - staged");
+  Say ("TscPwr probe v2.0 - RSC direct");
   ProbeOpen ();
-
-  CmdDb = NULL;
-  St = gBS->LocateProtocol (&gEfiCmdDbProtocolGuid, NULL, (VOID **)&CmdDb);
-  AsciiSPrint (Line, sizeof (Line), "CmdDb locate st=%r", St);
-  Say (Line);
-  if (!EFI_ERROR (St)) {
-    Say ("calling GetVersion ldoc3");
-    St = CmdDb->GetVersion (CmdDb, "ldoc3", &Ver3);
-    AsciiSPrint (Line, sizeof (Line), "ldoc3 ver st=%r ver=0x%x", St, Ver3);
-    Say (Line);
-
-    Say ("calling GetAddress ldoc3");
-    StA3 = CmdDb->GetAddress (CmdDb, "ldoc3", &Addr3);
-    AsciiSPrint (Line, sizeof (Line), "ldoc3 addr st=%r addr=0x%x", StA3, Addr3);
-    Say (Line);
-
-    Say ("calling GetVersion ldoc8");
-    St = CmdDb->GetVersion (CmdDb, "ldoc8", &Ver8);
-    AsciiSPrint (Line, sizeof (Line), "ldoc8 ver st=%r ver=0x%x", St, Ver8);
-    Say (Line);
-
-    Say ("calling GetAddress ldoc8");
-    StA8 = CmdDb->GetAddress (CmdDb, "ldoc8", &Addr8);
-    AsciiSPrint (Line, sizeof (Line), "ldoc8 addr st=%r addr=0x%x", StA8, Addr8);
-    Say (Line);
-  }
-
-  Rpmh = NULL;
-  St = gBS->LocateProtocol (&gEfiRpmhProtocolGuid, NULL, (VOID **)&Rpmh);
-  AsciiSPrint (Line, sizeof (Line), "Rpmh locate st=%r", St);
-  Say (Line);
-  if (!EFI_ERROR (St)) {
-    AsciiSPrint (Line, sizeof (Line), "Rpmh rev=0x%x", Rpmh->Revision);
-    Say (Line);
-
-    Say ("== SUMMARY ==");
-    AsciiSPrint (Line, sizeof (Line), "ldoc3 ver=0x%x addr st=%r addr=0x%x", Ver3, StA3, Addr3);
-    Say (Line);
-    AsciiSPrint (Line, sizeof (Line), "ldoc8 ver=0x%x addr st=%r addr=0x%x", Ver8, StA8, Addr8);
-    Say (Line);
-
-    //
-    // v1.0: runtime table readout + the actual votes.
-    // PmicDxeLa's per-PMIC tables are runtime-populated, so read
-    // them out of its loaded image (FILE_GUID slot at RVA
-    // 0x20018), walk table[2] (pm8350c) for the ldoc3/ldoc8 range
-    // entries, then issue the exact FA5F306B write calls its
-    // pm_ldo workers build: voltage first (cmd 2, steps payload),
-    // then enable (cmd 1, payload byte 0x80). All values are
-    // recomputed from the live tables, nothing hardcoded.
-    //
-    {
-      EFI_LOADED_IMAGE_PROTOCOL  *Img;
-      EFI_HANDLE                 *ImgHandles;
-      UINTN                       ImgCount, Ii;
-      UINT8                      *LaBase;
-      UINT8                      *Info, *Ctx, *Sub, *RangeTab, *Entry;
-      UINT32                      Count, Arg0, Min, Max, Step;
-      UINT16                      ResV[9], ResE[9], ResR[9];
-      UINT32                      StepsV[9], TargetUv;
-      VOID                       *Fa5;
-      VOID                       *Fa5Cached;
-
-      typedef EFI_STATUS (EFIAPI *FA5_READ)(
-        VOID *This, UINT32 Arg0, UINT32 One, UINT32 ResId,
-        UINT32 *Payload, UINT32 Cmd, VOID *Extra);
-      FA5_READ   Read;
-      UINT32     Payload;
-
-      STATIC EFI_GUID  LaGuid = { 0x5776232E, 0x082D, 0x4B75, { 0x9A, 0x0E, 0xFE, 0x1D, 0x13, 0xF7, 0xA5, 0xD9 } };
-      STATIC EFI_GUID  Fa5Guid = { 0xFA5F306B, 0xF47D, 0x4AC4, { 0xA4, 0x7D, 0x88, 0x2F, 0x82, 0x04, 0xEC, 0x30 } };
-
-      LaBase = NULL;
-      ImgHandles = NULL;
-      ImgCount = 0;
-      Say ("I1: enumerating loaded images");
-      St = gBS->LocateHandleBuffer (ByProtocol, &gEfiLoadedImageProtocolGuid, NULL, &ImgCount, &ImgHandles);
-      AsciiSPrint (Line, sizeof (Line), "images st=%r count=%u", St, (UINT32)ImgCount);
-      Say (Line);
-      if (!EFI_ERROR (St)) {
-        for (Ii = 0; Ii < ImgCount; Ii++) {
-          Img = NULL;
-          if (EFI_ERROR (gBS->HandleProtocol (ImgHandles[Ii], &gEfiLoadedImageProtocolGuid, (VOID **)&Img))) {
-            continue;
-          }
-          if (Img->ImageBase == NULL || Img->ImageSize < 0x21000) {
-            continue;
-          }
-          if (CompareGuid ((EFI_GUID *)((UINT8 *)Img->ImageBase + 0x20018), &LaGuid)) {
-            LaBase = (UINT8 *)Img->ImageBase;
-            break;
-          }
-        }
-        gBS->FreePool (ImgHandles);
-      }
-      AsciiSPrint (Line, sizeof (Line), "PmicDxeLa base=%p", LaBase);
-      Say (Line);
-
-      ResV[3] = ResV[8] = ResE[3] = ResE[8] = ResR[3] = ResR[8] = 0;
-      StepsV[3] = StepsV[8] = 0;
-      Arg0 = 0;
-      if (LaBase != NULL) {
-        Say ("I2: reading pmic table[2]");
-        Info = *(UINT8 **)(LaBase + 0x21CD0 + 2 * sizeof (VOID *));
-        AsciiSPrint (Line, sizeof (Line), "info=%p", Info);
-        Say (Line);
-        if (Info != NULL) {
-          Ctx = *(UINT8 **)Info;
-          Sub = *(UINT8 **)(Info + 8);
-          Arg0 = *(UINT32 *)Ctx;
-          Count = *(UINT32 *)(Info + 8 + 0xC);
-          RangeTab = *(UINT8 **)(Info + 8 + 0x10);
-          AsciiSPrint (Line, sizeof (Line), "arg0=0x%x count=%u S=%p range=%p", Arg0, Count, Sub, RangeTab);
-          Say (Line);
-          if (RangeTab != NULL && Count > 8) {
-            for (Idx = 3; Idx <= 8; Idx += 5) {
-              Entry = RangeTab + Idx * 0x14;
-              Min = *(UINT32 *)Entry;
-              Max = *(UINT32 *)(Entry + 4);
-              Step = *(UINT32 *)(Entry + 8);
-              TargetUv = (Idx == 3) ? 2800000 : 1800000;
-              ResV[Idx] = *(UINT16 *)(Sub + 0xC) + *(UINT16 *)(Entry + 0xC);
-              ResE[Idx] = *(UINT16 *)(Sub + 0x16) + *(UINT16 *)(Entry + 0xC);
-              ResR[Idx] = *(UINT16 *)(Sub + 0x10) + *(UINT16 *)(Entry + 0xC);
-              StepsV[Idx] = (Step != 0 && TargetUv >= Min && TargetUv <= Max)
-                            ? (TargetUv - Min) / Step : 0;
-              AsciiSPrint (Line, sizeof (Line),
-                "ldo%u min=%u max=%u step=%u valid=%u type=%u",
-                Idx, Min, Max, Step, Entry[0xE], Entry[0x10]);
-              Say (Line);
-              AsciiSPrint (Line, sizeof (Line),
-                "ldo%u resV=0x%x resE=0x%x steps(%u)=%u",
-                Idx, ResV[Idx], ResE[Idx], TargetUv, StepsV[Idx]);
-              Say (Line);
-              AsciiSPrint (Line, sizeof (Line),
-                "ldo%u resR=0x%x", Idx, ResR[Idx]);
-              Say (Line);
-            }
-          }
-        }
-        Fa5Cached = *(VOID **)(LaBase + 0x22580);
-        AsciiSPrint (Line, sizeof (Line), "FA5 cached=%p", Fa5Cached);
-        Say (Line);
-      }
-
-      Say ("I3: locating FA5F306B protocol");
-      Fa5 = NULL;
-      St = gBS->LocateProtocol (&Fa5Guid, NULL, &Fa5);
-      AsciiSPrint (Line, sizeof (Line), "FA5 locate st=%r ptr=%p", St, Fa5);
-      Say (Line);
-
-      if (Fa5 != NULL && StepsV[3] != 0 && StepsV[8] != 0) {
-        Read = (FA5_READ)((VOID **)Fa5)[1];
-
-        Say ("READ ldo3 voltage (channel check)");
-        Payload = 0;
-        St = Read (Fa5, Arg0, 1, ResR[3], &Payload, 2, NULL);
-        AsciiSPrint (Line, sizeof (Line), "ldo3 read st=%r steps=%u", St, Payload);
-        Say (Line);
-      } else {
-        Say ("READ SKIPPED (missing inputs)");
-      }
-
-      //
-      // v1.3 matrix results: hdr1/hdr2 sets only queue commands
-      // in RpmhDxe's core (Flag != 0 path appends to a pending
-      // list and returns 0 unsent); hdr0 sets reach the real TCS
-      // send, which returned 1. The trailing hdr0 repeat returned
-      // 0 via the core's "redundant commands" short circuit, not
-      // via a successful send. So the open question is the TCS
-      // send itself. v1.4 issues the single canonical set
-      // (hdr0/ent1, name "pmic") here at ReadyToBoot (EarlyVote
-      // in the entry point already issued it at DXE dispatch) so
-      // both timings can be compared in one boot.
-      //
-      if (Rpmh != NULL && Addr3 != 0 && Addr8 != 0 &&
-          StepsV[3] != 0 && StepsV[8] != 0) {
-        struct {
-          UINT32  Flag;
-          UINT32  Count;
-          UINT32  Reserved;
-          struct {
-            UINT32  Address;
-            UINT32  Data;
-            UINT8   Flag;
-            UINT8   Pad[3];
-          } E[4];
-        } Set;
-        VOID   *Handle;
-        INT32   Result;
-
-        Handle = NULL;
-        Rpmh->CreateHandle (2, "pmic", &Handle);
-        AsciiSPrint (Line, sizeof (Line), "LATE handle=%p", Handle);
-        Say (Line);
-        if (Handle != NULL) {
-          Set.Flag = 0;
-          Set.Count = 4;
-          Set.Reserved = 0;
-          Set.E[0].Address = Addr3;     Set.E[0].Data = StepsV[3];
-          Set.E[0].Flag = 1;            Set.E[0].Pad[0] = Set.E[0].Pad[1] = Set.E[0].Pad[2] = 0;
-          Set.E[1].Address = Addr3 + 4; Set.E[1].Data = 1;
-          Set.E[1].Flag = 1;            Set.E[1].Pad[0] = Set.E[1].Pad[1] = Set.E[1].Pad[2] = 0;
-          Set.E[2].Address = Addr8;     Set.E[2].Data = StepsV[8];
-          Set.E[2].Flag = 1;            Set.E[2].Pad[0] = Set.E[2].Pad[1] = Set.E[2].Pad[2] = 0;
-          Set.E[3].Address = Addr8 + 4; Set.E[3].Data = 1;
-          Set.E[3].Flag = 1;            Set.E[3].Pad[0] = Set.E[3].Pad[1] = Set.E[3].Pad[2] = 0;
-          Result = -1;
-          St = Rpmh->IssueSet (Handle, (RPMH_REQUEST_SET *)&Set, &Result);
-          AsciiSPrint (Line, sizeof (Line), "LATE IssueSet st=%r result=%d", St, Result);
-          Say (Line);
-          gBS->Stall (500000);
-          UefiTouchCheck ("LATE");
-        }
-        if (Fa5 != NULL) {
-          Read = (FA5_READ)((VOID **)Fa5)[1];
-          Payload = 0;
-          St = Read (Fa5, Arg0, 1, ResR[3], &Payload, 2, NULL);
-          AsciiSPrint (Line, sizeof (Line), "ldo3 now steps=%u st=%r", Payload, St);
-          Say (Line);
-          Payload = 0;
-          St = Read (Fa5, Arg0, 1, ResR[8], &Payload, 2, NULL);
-          AsciiSPrint (Line, sizeof (Line), "ldo8 now steps=%u st=%r", Payload, St);
-          Say (Line);
-        }
-        Say ("VOTE DONE");
-      } else {
-        Say ("VOTE SKIPPED (missing inputs)");
-      }
-    }
-  }
-
+  RscVote ("LATE");
+  gBS->Stall (500000);
+  UefiTouchCheck ("LATE");
   Say ("PROBE DONE");
   ProbeClose ();
   ProbeStoreVariable ();
@@ -675,76 +436,141 @@ UefiTouchCheck (
 }
 
 //
-// v1.4: the same canonical vote as ProbeRun issues at
-// ReadyToBoot, but fired at DXE dispatch time. The RpmhDxe
-// core's low-level TCS send is the current suspect (it returned
-// 1 for every real send at ReadyToBoot); the RSC/TCS state this
-// early — before the rest of the platform drivers run — may
-// differ. Voltages are the known mV values for ldoc3/ldoc8.
+// v2.0: bypass RpmhDxe entirely and program the apps RSC
+// directly, following the public mainline rpmh-rsc protocol
+// (drivers/soc/qcom/rpmh-rsc.c). RpmhDxe's queue/trigger chain
+// never completes a send on this build (v1.2-v1.5), so write
+// the ACTIVE TCS ourselves: buffer the commands, set
+// CMD_ENABLE, run the AMC trigger sequence, poll the DRV IRQ
+// status for completion, then clean up like tcs_tx_done.
 //
+// Layout (lahaina-family apps_rsc): RSC at 0x18200000, DRV2 at
+// +0x20000, TCS blocks at DRV + qcom,tcs-offset (0xD00), TCS
+// stride 672, command stride 20. tcs-config puts ACTIVE first,
+// so TCS 0 and 1 are the ACTIVE TCSes. RSC_DRV_STATUS is zero
+// while a TCS is busy. MSGID = LEN(8) | RESP_REQ | WRITE for
+// wait-for-completion writes.
+//
+#define RSC_DRV_BASE    0x18220000
+#define RSC_TCS_BASE    (RSC_DRV_BASE + 0xD00)
+#define RSC_TCS_STRIDE  672
+#define RSC_CMD_STRIDE  20
+#define RSC_REG32(A)    (*(volatile UINT32 *)(UINTN)(A))
+#define TCS_REG(T, R)   RSC_REG32 (RSC_TCS_BASE + RSC_TCS_STRIDE * (T) + (R))
+#define TCS_CMD(T, J, R) \
+  RSC_REG32 (RSC_TCS_BASE + RSC_TCS_STRIDE * (T) + (R) + RSC_CMD_STRIDE * (J))
+
+STATIC
+VOID
+RscSyncWrite (
+  IN UINTN   Addr,
+  IN UINT32  Value
+  )
+{
+  UINT32  Tries;
+
+  RSC_REG32 (Addr) = Value;
+  for (Tries = 0; Tries < 10000; Tries++) {
+    if (RSC_REG32 (Addr) == Value) {
+      return;
+    }
+    gBS->Stall (10);
+  }
+}
+
+STATIC
+VOID
+RscVote (
+  IN CHAR8  *Label
+  )
+{
+  CHAR8   Line[200];
+  UINT32  Cfg, NumTcs, Ncpt, T, J, Ctrl, IrqSt, Tries;
+  UINT32  CmdAddr[4];
+  UINT32  CmdData[4];
+
+  CmdAddr[0] = 0x40E00;  CmdData[0] = 2800;  /* ldoc3 voltage mV */
+  CmdAddr[1] = 0x40E04;  CmdData[1] = 1;     /* ldoc3 enable */
+  CmdAddr[2] = 0x42500;  CmdData[2] = 1800;  /* ldoc8 voltage mV */
+  CmdAddr[3] = 0x42504;  CmdData[3] = 1;     /* ldoc8 enable */
+
+  Cfg = RSC_REG32 (RSC_DRV_BASE + 0x0C);
+  NumTcs = (Cfg >> 12) & 0x3F;   /* DRV2 field of DRV_PRNT_CHLD_CONFIG */
+  Ncpt = (Cfg >> 27) & 0x1F;
+  AsciiSPrint (Line, sizeof (Line),
+    "%a RSC cfg=0x%x numtcs=%u ncpt=%u", Label, Cfg, NumTcs, Ncpt);
+  Say (Line);
+  if (NumTcs < 2 || NumTcs > 16 || Ncpt < 4 || Ncpt > 16) {
+    AsciiSPrint (Line, sizeof (Line), "%a RSC: implausible config, no writes", Label);
+    Say (Line);
+    return;
+  }
+
+  for (T = 0; T < 2; T++) {
+    if (TCS_REG (T, 0x18) == 0) {
+      AsciiSPrint (Line, sizeof (Line), "%a RSC: tcs%u busy, skip", Label, T);
+      Say (Line);
+      continue;
+    }
+    AsciiSPrint (Line, sizeof (Line),
+      "%a RSC: tcs%u status=0x%x ctrl=0x%x enable=0x%x",
+      Label, T, TCS_REG (T, 0x18), TCS_REG (T, 0x14), TCS_REG (T, 0x1C));
+    Say (Line);
+
+    for (J = 0; J < 4; J++) {
+      TCS_CMD (T, J, 0x30) = 8 | (1u << 8) | (1u << 16);  /* MSGID */
+      TCS_CMD (T, J, 0x34) = CmdAddr[J];                  /* ADDR */
+      TCS_CMD (T, J, 0x38) = CmdData[J];                  /* DATA */
+    }
+    TCS_REG (T, 0x1C) = TCS_REG (T, 0x1C) | 0xF;          /* CMD_ENABLE */
+
+    /* __tcs_set_trigger: clear trigger, clear enable (both
+       sync), set enable (sync), then set trigger (plain). */
+    Ctrl = TCS_REG (T, 0x14);
+    RscSyncWrite (RSC_TCS_BASE + RSC_TCS_STRIDE * T + 0x14, Ctrl & ~(1u << 24));
+    Ctrl = TCS_REG (T, 0x14);
+    RscSyncWrite (RSC_TCS_BASE + RSC_TCS_STRIDE * T + 0x14, Ctrl & ~(1u << 16));
+    RscSyncWrite (RSC_TCS_BASE + RSC_TCS_STRIDE * T + 0x14, (1u << 16));
+    TCS_REG (T, 0x14) = (1u << 16) | (1u << 24);
+
+    IrqSt = 0;
+    for (Tries = 0; Tries < 2000; Tries++) {
+      IrqSt = RSC_REG32 (RSC_TCS_BASE + 0x04);
+      if ((IrqSt & (1u << T)) != 0) {
+        break;
+      }
+      gBS->Stall (100);
+    }
+    AsciiSPrint (Line, sizeof (Line),
+      "%a RSC: tcs%u irq=0x%x tries=%u status=0x%x",
+      Label, T, IrqSt, Tries, TCS_REG (T, 0x18));
+    Say (Line);
+    for (J = 0; J < 4; J++) {
+      AsciiSPrint (Line, sizeof (Line),
+        "%a RSC: cmd%u status=0x%x", Label, J, TCS_CMD (T, J, 0x3C));
+      Say (Line);
+    }
+
+    /* reclaim like tcs_tx_done */
+    TCS_REG (T, 0x1C) = 0;
+    RSC_REG32 (RSC_TCS_BASE + 0x08) = (1u << T);
+    AsciiSPrint (Line, sizeof (Line), "%a RSC: vote fired on tcs%u", Label, T);
+    Say (Line);
+    return;
+  }
+
+  AsciiSPrint (Line, sizeof (Line), "%a RSC: no idle ACTIVE TCS", Label);
+  Say (Line);
+}
+
 STATIC
 VOID
 EarlyVote (
   VOID
   )
 {
-  EFI_CMDDB_PROTOCOL  *CmdDb;
-  EFI_RPMH_PROTOCOL   *Rpmh;
-  EFI_STATUS           St;
-  UINT32               Addr3, Addr8;
-  CHAR8                Line[128];
-  VOID                *Handle;
-  INT32                Result;
-  struct {
-    UINT32  Flag;
-    UINT32  Count;
-    UINT32  Reserved;
-    struct {
-      UINT32  Address;
-      UINT32  Data;
-      UINT8   Flag;
-      UINT8   Pad[3];
-    } E[4];
-  } Set;
-
-  Say ("EARLY vote at DXE entry");
-  CmdDb = NULL;
-  Rpmh = NULL;
-  Addr3 = Addr8 = 0;
-  if (EFI_ERROR (gBS->LocateProtocol (&gEfiCmdDbProtocolGuid, NULL, (VOID **)&CmdDb)) ||
-      EFI_ERROR (gBS->LocateProtocol (&gEfiRpmhProtocolGuid, NULL, (VOID **)&Rpmh))) {
-    Say ("EARLY: protocol locate failed");
-    return;
-  }
-  CmdDb->GetAddress (CmdDb, "ldoc3", &Addr3);
-  CmdDb->GetAddress (CmdDb, "ldoc8", &Addr8);
-  AsciiSPrint (Line, sizeof (Line), "EARLY addr3=0x%x addr8=0x%x", Addr3, Addr8);
-  Say (Line);
-  if (Addr3 == 0 || Addr8 == 0) {
-    return;
-  }
-  Handle = NULL;
-  Rpmh->CreateHandle (2, "pmic", &Handle);
-  AsciiSPrint (Line, sizeof (Line), "EARLY handle=%p", Handle);
-  Say (Line);
-  if (Handle == NULL) {
-    return;
-  }
-  Set.Flag = 0;
-  Set.Count = 4;
-  Set.Reserved = 0;
-  Set.E[0].Address = Addr3;     Set.E[0].Data = 2800;
-  Set.E[0].Flag = 1;            Set.E[0].Pad[0] = Set.E[0].Pad[1] = Set.E[0].Pad[2] = 0;
-  Set.E[1].Address = Addr3 + 4; Set.E[1].Data = 1;
-  Set.E[1].Flag = 1;            Set.E[1].Pad[0] = Set.E[1].Pad[1] = Set.E[1].Pad[2] = 0;
-  Set.E[2].Address = Addr8;     Set.E[2].Data = 1800;
-  Set.E[2].Flag = 1;            Set.E[2].Pad[0] = Set.E[2].Pad[1] = Set.E[2].Pad[2] = 0;
-  Set.E[3].Address = Addr8 + 4; Set.E[3].Data = 1;
-  Set.E[3].Flag = 1;            Set.E[3].Pad[0] = Set.E[3].Pad[1] = Set.E[3].Pad[2] = 0;
-  Result = -1;
-  St = Rpmh->IssueSet (Handle, (RPMH_REQUEST_SET *)&Set, &Result);
-  AsciiSPrint (Line, sizeof (Line), "EARLY IssueSet st=%r result=%d", St, Result);
-  Say (Line);
+  Say ("EARLY vote at DXE entry (RSC direct)");
+  RscVote ("EARLY");
   gBS->Stall (500000);
   UefiTouchCheck ("EARLY");
 }
