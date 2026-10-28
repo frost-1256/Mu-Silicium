@@ -38,6 +38,7 @@
 #include "EFIRpmh.h"
 #include "EFICmdDb.h"
 #include <Protocol/SimpleFileSystem.h>
+#include <Protocol/LoadedImage.h>
 
 STATIC EFI_FILE_PROTOCOL *gProbeRoot;
 STATIC EFI_FILE_PROTOCOL *gProbeFile;
@@ -207,7 +208,7 @@ ProbeRun (
 
   Addr3 = Addr8 = 0; Ver3 = Ver8 = 0; StA3 = StA8 = EFI_NOT_FOUND;
 
-  Say ("TscPwr probe v0.8 - staged");
+  Say ("TscPwr probe v0.9 - staged");
   ProbeOpen ();
 
   CmdDb = NULL;
@@ -251,21 +252,101 @@ ProbeRun (
     Say (Line);
 
     //
-    // NV variables do not persist on this platform build (the
-    // v0.7 rotation repeated drv=1 on the second boot), so try
-    // the remaining candidates in one boot, in order. A candidate
-    // that trips RpmhDxe's broken error path kills the boot --
-    // the "trying" line for it is the data point in that case.
+    // v0.9: runtime introspection (READ-ONLY, no hardware writes).
+    // PmicDxeLa's per-PMIC tables are runtime-populated, so read
+    // them out of its loaded image: find the image whose .data
+    // GUID slot (RVA 0x20018) equals PmicDxeLa's FILE_GUID, then
+    // walk table[2] (pm8350c) -> info -> range entries 3 and 8,
+    // and mirror the exact FA5F306B call tuples its pm_ldo
+    // workers would build (voltage: cmd 2, steps payload;
+    // enable: cmd 1, 0x80 payload).
     //
-    for (Idx = 0; Idx < 3; Idx++) {
-      AsciiSPrint (Line, sizeof (Line), "trying CreateHandle drv=%u", Idx + 2);
-      Say (Line);
-      Handle = NULL;
-      St = Rpmh->CreateHandle (Idx + 2, "pmic", &Handle);
-      AsciiSPrint (Line, sizeof (Line), "CreateHandle drv=%u st=%r handle=%p", Idx + 2, St, Handle);
+    {
+      EFI_LOADED_IMAGE_PROTOCOL  *Img;
+      EFI_HANDLE                 *ImgHandles;
+      UINTN                       ImgCount, Ii;
+      UINT8                      *LaBase;
+      UINT8                      *Info, *Ctx, *Sub, *RangeTab, *Entry;
+      UINT32                      Count, Arg0, Min, Max, Step;
+      UINT16                      ResV, ResE;
+      VOID                       *Fa5;
+
+      STATIC EFI_GUID  LaGuid = { 0x5776232E, 0x082D, 0x4B75, { 0x9A, 0x0E, 0xFE, 0x1D, 0x13, 0xF7, 0xA5, 0xD9 } };
+      STATIC EFI_GUID  Fa5Guid = { 0xFA5F306B, 0xF47D, 0x4AC4, { 0xA4, 0x7D, 0x88, 0x2F, 0x82, 0x04, 0xEC, 0x30 } };
+
+      LaBase = NULL;
+      ImgHandles = NULL;
+      ImgCount = 0;
+      Say ("I1: enumerating loaded images");
+      St = gBS->LocateHandleBuffer (ByProtocol, &gEfiLoadedImageProtocolGuid, NULL, &ImgCount, &ImgHandles);
+      AsciiSPrint (Line, sizeof (Line), "images st=%r count=%u", St, (UINT32)ImgCount);
       Say (Line);
       if (!EFI_ERROR (St)) {
-        break;
+        for (Ii = 0; Ii < ImgCount; Ii++) {
+          Img = NULL;
+          if (EFI_ERROR (gBS->HandleProtocol (ImgHandles[Ii], &gEfiLoadedImageProtocolGuid, (VOID **)&Img))) {
+            continue;
+          }
+          if (Img->ImageBase == NULL || Img->ImageSize < 0x21000) {
+            continue;
+          }
+          if (CompareGuid ((EFI_GUID *)((UINT8 *)Img->ImageBase + 0x20018), &LaGuid)) {
+            LaBase = (UINT8 *)Img->ImageBase;
+            break;
+          }
+        }
+        gBS->FreePool (ImgHandles);
+      }
+      AsciiSPrint (Line, sizeof (Line), "PmicDxeLa base=%p", LaBase);
+      Say (Line);
+
+      if (LaBase != NULL) {
+        Say ("I2: reading pmic table[2]");
+        Info = *(UINT8 **)(LaBase + 0x21CD0 + 2 * sizeof (VOID *));
+        AsciiSPrint (Line, sizeof (Line), "info=%p", Info);
+        Say (Line);
+        if (Info != NULL) {
+          Ctx = *(UINT8 **)Info;
+          Sub = *(UINT8 **)(Info + 8);
+          Arg0 = *(UINT32 *)Ctx;
+          Count = *(UINT32 *)(Info + 8 + 0xC);
+          RangeTab = *(UINT8 **)(Info + 8 + 0x10);
+          AsciiSPrint (Line, sizeof (Line), "arg0=0x%x count=%u S=%p range=%p", Arg0, Count, Sub, RangeTab);
+          Say (Line);
+          if (RangeTab != NULL && Count > 8) {
+            for (Idx = 3; Idx <= 8; Idx += 5) {
+              Entry = RangeTab + Idx * 0x14;
+              Min = *(UINT32 *)Entry;
+              Max = *(UINT32 *)(Entry + 4);
+              Step = *(UINT32 *)(Entry + 8);
+              ResV = *(UINT16 *)(Sub + 0xC) + *(UINT16 *)(Entry + 0xC);
+              ResE = *(UINT16 *)(Sub + 0x16) + *(UINT16 *)(Entry + 0xC);
+              AsciiSPrint (Line, sizeof (Line),
+                "ldo%u min=%u max=%u step=%u valid=%u type=%u",
+                Idx, Min, Max, Step, Entry[0xE], Entry[0x10]);
+              Say (Line);
+              AsciiSPrint (Line, sizeof (Line),
+                "ldo%u resV=0x%x resE=0x%x steps(%u)=%u",
+                Idx, ResV, ResE,
+                (Idx == 3) ? 2800000 : 1800000,
+                (Step != 0) ? (((Idx == 3) ? 2800000 : 1800000) - Min) / Step : 0);
+              Say (Line);
+            }
+          }
+        }
+        AsciiSPrint (Line, sizeof (Line), "FA5 cached=%p", *(VOID **)(LaBase + 0x22580));
+        Say (Line);
+      }
+
+      Say ("I3: locating FA5F306B protocol");
+      Fa5 = NULL;
+      St = gBS->LocateProtocol (&Fa5Guid, NULL, &Fa5);
+      AsciiSPrint (Line, sizeof (Line), "FA5 locate st=%r ptr=%p", St, Fa5);
+      Say (Line);
+      if (Fa5 != NULL) {
+        AsciiSPrint (Line, sizeof (Line), "FA5 m08=%p m10=%p m18=%p",
+          ((VOID **)Fa5)[1], ((VOID **)Fa5)[2], ((VOID **)Fa5)[3]);
+        Say (Line);
       }
     }
   }
