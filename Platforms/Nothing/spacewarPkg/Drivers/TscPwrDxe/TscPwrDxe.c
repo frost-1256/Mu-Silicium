@@ -198,7 +198,7 @@ ProbeRun (
   VOID
   )
 {
-  Say ("TscPwr probe v2.0 - RSC direct");
+  Say ("TscPwr probe v2.1 - RSC direct");
   ProbeOpen ();
   RscVote ("LATE");
   gBS->Stall (500000);
@@ -486,13 +486,15 @@ RscVote (
 {
   CHAR8   Line[200];
   UINT32  Cfg, NumTcs, Ncpt, T, J, Ctrl, IrqSt, Tries;
-  UINT32  CmdAddr[4];
-  UINT32  CmdData[4];
+  UINT32  CmdAddr[6];
+  UINT32  CmdData[6];
 
   CmdAddr[0] = 0x40E00;  CmdData[0] = 2800;  /* ldoc3 voltage mV */
-  CmdAddr[1] = 0x40E04;  CmdData[1] = 1;     /* ldoc3 enable */
-  CmdAddr[2] = 0x42500;  CmdData[2] = 1800;  /* ldoc8 voltage mV */
-  CmdAddr[3] = 0x42504;  CmdData[3] = 1;     /* ldoc8 enable */
+  CmdAddr[1] = 0x40E08;  CmdData[1] = 7;     /* ldoc3 mode HPM */
+  CmdAddr[2] = 0x40E04;  CmdData[2] = 1;     /* ldoc3 enable */
+  CmdAddr[3] = 0x42500;  CmdData[3] = 1800;  /* ldoc8 voltage mV */
+  CmdAddr[4] = 0x42508;  CmdData[4] = 7;     /* ldoc8 mode HPM */
+  CmdAddr[5] = 0x42504;  CmdData[5] = 1;     /* ldoc8 enable */
 
   Cfg = RSC_REG32 (RSC_DRV_BASE + 0x0C);
   NumTcs = (Cfg >> 12) & 0x3F;   /* DRV2 field of DRV_PRNT_CHLD_CONFIG */
@@ -517,12 +519,12 @@ RscVote (
       Label, T, TCS_REG (T, 0x18), TCS_REG (T, 0x14), TCS_REG (T, 0x1C));
     Say (Line);
 
-    for (J = 0; J < 4; J++) {
+    for (J = 0; J < 6; J++) {
       TCS_CMD (T, J, 0x30) = 8 | (1u << 8) | (1u << 16);  /* MSGID */
       TCS_CMD (T, J, 0x34) = CmdAddr[J];                  /* ADDR */
       TCS_CMD (T, J, 0x38) = CmdData[J];                  /* DATA */
     }
-    TCS_REG (T, 0x1C) = TCS_REG (T, 0x1C) | 0xF;          /* CMD_ENABLE */
+    TCS_REG (T, 0x1C) = TCS_REG (T, 0x1C) | 0x3F;          /* CMD_ENABLE */
 
     /* __tcs_set_trigger: clear trigger, clear enable (both
        sync), set enable (sync), then set trigger (plain). */
@@ -545,7 +547,7 @@ RscVote (
       "%a RSC: tcs%u irq=0x%x tries=%u status=0x%x",
       Label, T, IrqSt, Tries, TCS_REG (T, 0x18));
     Say (Line);
-    for (J = 0; J < 4; J++) {
+    for (J = 0; J < 6; J++) {
       AsciiSPrint (Line, sizeof (Line),
         "%a RSC: cmd%u status=0x%x", Label, J, TCS_CMD (T, J, 0x3C));
       Say (Line);
@@ -570,6 +572,7 @@ EarlyVote (
   )
 {
   Say ("EARLY vote at DXE entry (RSC direct)");
+  UefiTouchCheck ("PRE");
   RscVote ("EARLY");
   gBS->Stall (500000);
   UefiTouchCheck ("EARLY");
