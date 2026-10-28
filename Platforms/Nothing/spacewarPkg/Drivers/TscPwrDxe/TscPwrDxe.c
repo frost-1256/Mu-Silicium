@@ -10,11 +10,19 @@
   (established by the v0.x-v1.x probes; see
   winboot/UEFI_TOUCH_POWER_PLAN.md).
 
-  The vote runs twice: once at DXE dispatch and once at
+  The vote runs twice: once at EndOfDxe and once at
   ReadyToBoot. It is idempotent (same values re-asserted) and
   every failure path falls through silently: this driver must
   never block or slow the boot. No console output; results go
   to DEBUG only.
+
+  TIMING MATTERS: v3.0 voted at driver dispatch (no Depex)
+  and hung the boot at the logo — at raw dispatch time the
+  RSC block is not reachable yet (the same trap that killed
+  the v1.0 SPMI probe with a synchronous external abort).
+  The events provide the late timing the v2.x Depex on the
+  Rpmh/CmdDb protocols used to guarantee, without depending
+  on that stack.
 
   RSC protocol follows mainline drivers/soc/qcom/rpmh-rsc.c:
   apps RSC at 0x18200000, DRV2 at +0x20000, TCS blocks at
@@ -251,9 +259,22 @@ TscPwrDxeEntry (
   IN EFI_SYSTEM_TABLE  *SystemTable
   )
 {
-  EFI_EVENT  Event;
+  EFI_EVENT   Event;
+  EFI_STATUS  Status;
 
-  RscVote ();
+  /* No MMIO in the entry point: register the two vote events
+     (EndOfDxe, then ReadyToBoot). See the timing note above. */
+  Status = gBS->CreateEventEx (
+                  EVT_NOTIFY_SIGNAL,
+                  TPL_CALLBACK,
+                  VoteNotify,
+                  NULL,
+                  &gEfiEndOfDxeEventGroupGuid,
+                  &Event
+                  );
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
   return gBS->CreateEventEx (
                 EVT_NOTIFY_SIGNAL,
                 TPL_CALLBACK,

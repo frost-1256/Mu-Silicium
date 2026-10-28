@@ -3,7 +3,7 @@
   BASE_NAME                      = TscPwrDxe
   FILE_GUID                      = 1a799c27-4f8f-4bd1-ae13-cf36acf7dbf2
   MODULE_TYPE                    = DXE_DRIVER
-  VERSION_STRING                 = 3.0
+  VERSION_STRING                 = 3.1
   ENTRY_POINT                    = TscPwrDxeEntry
 
 [Sources]
@@ -19,6 +19,7 @@
   BaseLib
 
 [Guids]
+  gEfiEndOfDxeEventGroupGuid
   gEfiEventReadyToBootGuid
 
 [Depex]
