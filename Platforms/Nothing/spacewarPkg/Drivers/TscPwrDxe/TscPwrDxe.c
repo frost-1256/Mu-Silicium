@@ -207,7 +207,7 @@ ProbeRun (
 
   Addr3 = Addr8 = 0; Ver3 = Ver8 = 0; StA3 = StA8 = EFI_NOT_FOUND;
 
-  Say ("TscPwr probe v1.1 - staged");
+  Say ("TscPwr probe v1.2 - staged");
   ProbeOpen ();
 
   CmdDb = NULL;
@@ -272,10 +272,6 @@ ProbeRun (
       VOID                       *Fa5;
       VOID                       *Fa5Cached;
 
-      typedef EFI_STATUS (EFIAPI *FA5_WRITE)(
-        VOID *This, UINT32 Arg0, UINT32 One, UINT32 ResId,
-        UINT32 *Payload, UINT32 Cmd);
-      FA5_WRITE  Write;
       typedef EFI_STATUS (EFIAPI *FA5_READ)(
         VOID *This, UINT32 Arg0, UINT32 One, UINT32 ResId,
         UINT32 *Payload, UINT32 Cmd, VOID *Extra);
@@ -366,34 +362,93 @@ ProbeRun (
 
       if (Fa5 != NULL && StepsV[3] != 0 && StepsV[8] != 0) {
         Read = (FA5_READ)((VOID **)Fa5)[1];
-        Write = (FA5_WRITE)((VOID **)Fa5)[2];
 
         Say ("READ ldo3 voltage (channel check)");
         Payload = 0;
         St = Read (Fa5, Arg0, 1, ResR[3], &Payload, 2, NULL);
         AsciiSPrint (Line, sizeof (Line), "ldo3 read st=%r steps=%u", St, Payload);
         Say (Line);
-        for (Idx = 3; Idx <= 8; Idx += 5) {
-          AsciiSPrint (Line, sizeof (Line), "VOTE ldo%u voltage steps=%u", Idx, StepsV[Idx]);
-          Say (Line);
-          Payload = StepsV[Idx];
-          St = Write (Fa5, Arg0, 1, ResV[Idx], &Payload, 2);
-          AsciiSPrint (Line, sizeof (Line), "ldo%u voltage st=%r", Idx, St);
-          Say (Line);
+      } else {
+        Say ("READ SKIPPED (missing inputs)");
+      }
 
-          AsciiSPrint (Line, sizeof (Line), "VOTE ldo%u enable", Idx);
-          Say (Line);
-          Payload = 0x80;
-          St = Write (Fa5, Arg0, 1, ResE[Idx], &Payload, 1);
-          AsciiSPrint (Line, sizeof (Line), "ldo%u enable st=%r", Idx, St);
-          Say (Line);
-        }
-        Say ("READBACK ldo3 voltage");
-        Payload = 0;
-        St = Read (Fa5, Arg0, 1, ResR[3], &Payload, 2, NULL);
-        AsciiSPrint (Line, sizeof (Line), "ldo3 now steps=%u st=%r", Payload, St);
+      //
+      // v1.2: FA5 *writes* fault in the PMIC arbiter TX window
+      // (v1.0/v1.1: SPMI.dll+0x3544, FAR = arb + 0x200008) while
+      // reads via the observer window succeed — the LDO TX
+      // channels belong to the RPMh/AOP side, not to this EE.
+      // That matches Linux: pm8350c LDOs are rpmh-regulators,
+      // never SPMI-written. So vote through RPMh instead
+      // (mainline qcom-rpmh-regulator.c, VRM format):
+      //   voltage: addr + 0, data = millivolts
+      //   enable:  addr + 4, data = 1
+      // Set flag 0 = RPMH_ACTIVE_ONLY_STATE; entry flag 1 =
+      // wait_for_compl. StepsV[] already equals mV here
+      // (min 0, step 1000 uV). Readback via the FA5 read above.
+      //
+      if (Rpmh != NULL && Addr3 != 0 && Addr8 != 0 &&
+          StepsV[3] != 0 && StepsV[8] != 0) {
+        struct {
+          UINT32  Flag;
+          UINT32  Count;
+          UINT32  Reserved;
+          struct {
+            UINT32  Address;
+            UINT32  Data;
+            UINT8   Flag;
+            UINT8   Pad[3];
+          } E[4];
+        } Set;
+        VOID   *Handle;
+        INT32   Result;
+
+        Handle = NULL;
+        Say ("RPMH CreateHandle drv=2");
+        Rpmh->CreateHandle (2, "tscpwr", &Handle);
+        AsciiSPrint (Line, sizeof (Line), "handle=%p", Handle);
         Say (Line);
-        Say ("VOTES ISSUED");
+
+        if (Handle != NULL) {
+          Set.Flag = 0;
+          Set.Count = 4;
+          Set.Reserved = 0;
+          Set.E[0].Address = Addr3;     Set.E[0].Data = StepsV[3];
+          Set.E[0].Flag = 1;            Set.E[0].Pad[0] = Set.E[0].Pad[1] = Set.E[0].Pad[2] = 0;
+          Set.E[1].Address = Addr3 + 4; Set.E[1].Data = 1;
+          Set.E[1].Flag = 1;            Set.E[1].Pad[0] = Set.E[1].Pad[1] = Set.E[1].Pad[2] = 0;
+          Set.E[2].Address = Addr8;     Set.E[2].Data = StepsV[8];
+          Set.E[2].Flag = 1;            Set.E[2].Pad[0] = Set.E[2].Pad[1] = Set.E[2].Pad[2] = 0;
+          Set.E[3].Address = Addr8 + 4; Set.E[3].Data = 1;
+          Set.E[3].Flag = 1;            Set.E[3].Pad[0] = Set.E[3].Pad[1] = Set.E[3].Pad[2] = 0;
+
+          Say ("RPMH IssueSet ACTIVE: ldo3 2800mV+en, ldo8 1800mV+en");
+          Result = -1;
+          St = Rpmh->IssueSet (Handle, (RPMH_REQUEST_SET *)&Set, &Result);
+          AsciiSPrint (Line, sizeof (Line), "IssueSet st=%r result=%d", St, Result);
+          Say (Line);
+          if (Result != 0) {
+            St = Rpmh->Churn22 (Handle, (UINT32)Result);
+            AsciiSPrint (Line, sizeof (Line), "churn22 st=%r", St);
+            Say (Line);
+            St = Rpmh->Churn23 (Handle, (UINT32)Result);
+            AsciiSPrint (Line, sizeof (Line), "churn23 st=%r", St);
+            Say (Line);
+          }
+
+          gBS->Stall (500000);
+          if (Fa5 != NULL) {
+            Read = (FA5_READ)((VOID **)Fa5)[1];
+            Payload = 0;
+            St = Read (Fa5, Arg0, 1, ResR[3], &Payload, 2, NULL);
+            AsciiSPrint (Line, sizeof (Line), "ldo3 now steps=%u st=%r", Payload, St);
+            Say (Line);
+            Payload = 0;
+            St = Read (Fa5, Arg0, 1, ResR[8], &Payload, 2, NULL);
+            AsciiSPrint (Line, sizeof (Line), "ldo8 now steps=%u st=%r", Payload, St);
+            Say (Line);
+          }
+          Say ("VOTES ISSUED");
+        }
       } else {
         Say ("VOTE SKIPPED (missing inputs)");
       }
@@ -450,6 +505,9 @@ TscPwrDxeEntry (
   // (v1.0 died with a synchronous external abort inside SPMI.dll
   // at FAR 0x0DE30008). Defer the whole sequence to ReadyToBoot,
   // when platform init has brought everything up.
+  // v1.2: even at ReadyToBoot the FA5 write faults (arbiter TX
+  // window) while reads succeed; the votes go through RPMh
+  // IssueSet instead (see the vote block in ProbeRun).
   //
   return gBS->CreateEventEx (
                 EVT_NOTIFY_SIGNAL,
