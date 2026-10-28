@@ -3988,7 +3988,7 @@
 | USB Device Mode    |                                     | ✅    |
 | USB Power Delivery |                                     | ❌    |
 | Mass Storage       | Unstable, Breaks on Large Transfers | ⚠️    |
-| Windows Boot       |                                     | ❌    |
+| Windows Boot       |                                     | ✅    |
 | Linux Boot         |                                     | ❌    |
 
 </details>
