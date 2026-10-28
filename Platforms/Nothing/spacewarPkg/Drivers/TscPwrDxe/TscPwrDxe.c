@@ -207,7 +207,7 @@ ProbeRun (
 
   Addr3 = Addr8 = 0; Ver3 = Ver8 = 0; StA3 = StA8 = EFI_NOT_FOUND;
 
-  Say ("TscPwr probe v1.0 - staged");
+  Say ("TscPwr probe v1.1 - staged");
   ProbeOpen ();
 
   CmdDb = NULL;
@@ -267,7 +267,7 @@ ProbeRun (
       UINT8                      *LaBase;
       UINT8                      *Info, *Ctx, *Sub, *RangeTab, *Entry;
       UINT32                      Count, Arg0, Min, Max, Step;
-      UINT16                      ResV[9], ResE[9];
+      UINT16                      ResV[9], ResE[9], ResR[9];
       UINT32                      StepsV[9], TargetUv;
       VOID                       *Fa5;
       VOID                       *Fa5Cached;
@@ -276,6 +276,10 @@ ProbeRun (
         VOID *This, UINT32 Arg0, UINT32 One, UINT32 ResId,
         UINT32 *Payload, UINT32 Cmd);
       FA5_WRITE  Write;
+      typedef EFI_STATUS (EFIAPI *FA5_READ)(
+        VOID *This, UINT32 Arg0, UINT32 One, UINT32 ResId,
+        UINT32 *Payload, UINT32 Cmd, VOID *Extra);
+      FA5_READ   Read;
       UINT32     Payload;
 
       STATIC EFI_GUID  LaGuid = { 0x5776232E, 0x082D, 0x4B75, { 0x9A, 0x0E, 0xFE, 0x1D, 0x13, 0xF7, 0xA5, 0xD9 } };
@@ -307,7 +311,7 @@ ProbeRun (
       AsciiSPrint (Line, sizeof (Line), "PmicDxeLa base=%p", LaBase);
       Say (Line);
 
-      ResV[3] = ResV[8] = ResE[3] = ResE[8] = 0;
+      ResV[3] = ResV[8] = ResE[3] = ResE[8] = ResR[3] = ResR[8] = 0;
       StepsV[3] = StepsV[8] = 0;
       Arg0 = 0;
       if (LaBase != NULL) {
@@ -332,6 +336,7 @@ ProbeRun (
               TargetUv = (Idx == 3) ? 2800000 : 1800000;
               ResV[Idx] = *(UINT16 *)(Sub + 0xC) + *(UINT16 *)(Entry + 0xC);
               ResE[Idx] = *(UINT16 *)(Sub + 0x16) + *(UINT16 *)(Entry + 0xC);
+              ResR[Idx] = *(UINT16 *)(Sub + 0x10) + *(UINT16 *)(Entry + 0xC);
               StepsV[Idx] = (Step != 0 && TargetUv >= Min && TargetUv <= Max)
                             ? (TargetUv - Min) / Step : 0;
               AsciiSPrint (Line, sizeof (Line),
@@ -341,6 +346,9 @@ ProbeRun (
               AsciiSPrint (Line, sizeof (Line),
                 "ldo%u resV=0x%x resE=0x%x steps(%u)=%u",
                 Idx, ResV[Idx], ResE[Idx], TargetUv, StepsV[Idx]);
+              Say (Line);
+              AsciiSPrint (Line, sizeof (Line),
+                "ldo%u resR=0x%x", Idx, ResR[Idx]);
               Say (Line);
             }
           }
@@ -357,7 +365,14 @@ ProbeRun (
       Say (Line);
 
       if (Fa5 != NULL && StepsV[3] != 0 && StepsV[8] != 0) {
+        Read = (FA5_READ)((VOID **)Fa5)[1];
         Write = (FA5_WRITE)((VOID **)Fa5)[2];
+
+        Say ("READ ldo3 voltage (channel check)");
+        Payload = 0;
+        St = Read (Fa5, Arg0, 1, ResR[3], &Payload, 2, NULL);
+        AsciiSPrint (Line, sizeof (Line), "ldo3 read st=%r steps=%u", St, Payload);
+        Say (Line);
         for (Idx = 3; Idx <= 8; Idx += 5) {
           AsciiSPrint (Line, sizeof (Line), "VOTE ldo%u voltage steps=%u", Idx, StepsV[Idx]);
           Say (Line);
@@ -373,6 +388,11 @@ ProbeRun (
           AsciiSPrint (Line, sizeof (Line), "ldo%u enable st=%r", Idx, St);
           Say (Line);
         }
+        Say ("READBACK ldo3 voltage");
+        Payload = 0;
+        St = Read (Fa5, Arg0, 1, ResR[3], &Payload, 2, NULL);
+        AsciiSPrint (Line, sizeof (Line), "ldo3 now steps=%u st=%r", Payload, St);
+        Say (Line);
         Say ("VOTES ISSUED");
       } else {
         Say ("VOTE SKIPPED (missing inputs)");
@@ -404,6 +424,18 @@ ProbeStoreVariable (
          );
 }
 
+STATIC
+VOID
+EFIAPI
+VoteNotify (
+  IN EFI_EVENT  Event,
+  IN VOID       *Context
+  )
+{
+  ProbeRun ();
+  gBS->CloseEvent (Event);
+}
+
 EFI_STATUS
 EFIAPI
 TscPwrDxeEntry (
@@ -411,6 +443,20 @@ TscPwrDxeEntry (
   IN EFI_SYSTEM_TABLE  *SystemTable
   )
 {
-  ProbeRun ();
-  return EFI_SUCCESS;
+  EFI_EVENT  Event;
+
+  //
+  // v1.1: at DXE dispatch the SPMI block is not reachable yet
+  // (v1.0 died with a synchronous external abort inside SPMI.dll
+  // at FAR 0x0DE30008). Defer the whole sequence to ReadyToBoot,
+  // when platform init has brought everything up.
+  //
+  return gBS->CreateEventEx (
+                EVT_NOTIFY_SIGNAL,
+                TPL_CALLBACK,
+                VoteNotify,
+                NULL,
+                &gEfiEventReadyToBootGuid,
+                &Event
+                );
 }
