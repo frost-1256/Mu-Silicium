@@ -92,4 +92,5 @@
   #
   # Touch power probe (FT3680 rails; see Drivers/TscPwrDxe)
   #
-  spacewarPkg/Drivers/TscPwrDxe/TscPwrDxe.inf
+  # E5 VARIANT: touch rails NOT voted at boot (PEP-vote reachability test)
+  # spacewarPkg/Drivers/TscPwrDxe/TscPwrDxe.inf
