@@ -52,7 +52,7 @@
 // ---------- log buffer + ESP file (pattern: TscPwrDxe v0.4) ----------
 //
 
-STATIC CHAR8               gProbeBuf[16384];
+STATIC CHAR8               gProbeBuf[32768];
 STATIC UINTN               gProbeLen;
 STATIC UINTN               gFileLen;
 STATIC EFI_FILE_PROTOCOL   *gProbeRoot;
@@ -518,21 +518,25 @@ RailProbeEntry (
   LogLine ("RailProbe v1.0 (E5 base: no TscPwrDxe; read-only)");
   Sample ("ENTRY");
 
-  gBS->CreateEventEx (
-         EVT_NOTIFY_SIGNAL,
-         TPL_CALLBACK,
-         EndOfDxeNotify,
-         NULL,
-         &gEfiEndOfDxeEventGroupGuid,
-         &Event
-         );
-  gBS->CreateEventEx (
-         EVT_NOTIFY_SIGNAL,
-         TPL_CALLBACK,
-         ReadyToBootNotify,
-         NULL,
-         &gEfiEventReadyToBootGuid,
-         &Event
-         );
+  if (EFI_ERROR (gBS->CreateEventEx (
+                          EVT_NOTIFY_SIGNAL,
+                          TPL_CALLBACK,
+                          EndOfDxeNotify,
+                          NULL,
+                          &gEfiEndOfDxeEventGroupGuid,
+                          &Event
+                          ))) {
+    LogLine ("RailProbe: EndOfDxe event registration FAILED");
+  }
+  if (EFI_ERROR (gBS->CreateEventEx (
+                          EVT_NOTIFY_SIGNAL,
+                          TPL_CALLBACK,
+                          ReadyToBootNotify,
+                          NULL,
+                          &gEfiEventReadyToBootGuid,
+                          &Event
+                          ))) {
+    LogLine ("RailProbe: ReadyToBoot event registration FAILED");
+  }
   return EFI_SUCCESS;
 }
