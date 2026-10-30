@@ -94,3 +94,4 @@
   #
   # E5 VARIANT: touch rails NOT voted at boot (PEP-vote reachability test)
   # spacewarPkg/Drivers/TscPwrDxe/TscPwrDxe.inf
+  spacewarPkg/Drivers/RailProbeDxe/RailProbeDxe.inf
