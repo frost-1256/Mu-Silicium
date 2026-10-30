@@ -570,6 +570,35 @@ Sample (
   }
 }
 
+STATIC
+VOID
+EFIAPI
+EndOfDxeNotify (
+  IN EFI_EVENT  Event,
+  IN VOID       *Context
+  )
+{
+  ProbeOpen ();
+  Sample ("ENDOFDXE");
+  gBS->CloseEvent (Event);
+}
+
+STATIC
+VOID
+EFIAPI
+ReadyToBootNotify (
+  IN EFI_EVENT  Event,
+  IN VOID       *Context
+  )
+{
+  ProbeOpen ();
+  Sample ("READYTOBOOT");
+  Say ("RailProbe done - holding 15 s");
+  gBS->Stall (15000000);
+  ProbeClose ();
+  gBS->CloseEvent (Event);
+}
+
 EFI_STATUS
 EFIAPI
 RailProbeEntry (
