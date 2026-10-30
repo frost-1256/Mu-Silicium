@@ -2,6 +2,15 @@
   RailProbeDxe — READ-ONLY probe: when do the FT3680 touch rails
   come up during boot on spacewar (E5 follow-up)?
 
+  v1.1: the ESP file channel yielded no file on the first
+  real-hardware run (Run #61; driver verified present in the
+  image and in the APRIORI list), so v1.1 adds the historic
+  fallback from the TscPwrDxe probe era: a compact verdict
+  table printed to the console with stalls, re-printed at
+  every sample so it is visible whenever the console comes
+  up, with a long hold at ReadyToBoot for reading/photographing.
+  The ESP file logging is kept as-is.
+
   Background: the E5 variant UEFI (Run #60) removed TscPwrDxe,
   the driver that votes pm8350c LDO3_C (2.8 V) and LDO8_C (1.8 V)
   up during DXE — yet touch worked from the start of Windows.
@@ -226,9 +235,13 @@ ProbeClose (
 STATIC
 VOID
 TcsDump (
-  IN CHAR8  *Label
+  IN CHAR8   *Label,
+  OUT UINT32  *Ldoc3Hits,
+  OUT UINT32  *Ldoc8Hits
   )
 {
+  *Ldoc3Hits = 0;
+  *Ldoc8Hits = 0;
   UINT32  Cfg, NumTcs, Ncpt, T, J;
   UINT32  Addr, Data, Status;
 
@@ -255,8 +268,10 @@ TcsDump (
       Data   = TCS_CMD (T, J, 0x38);
       Status = TCS_CMD (T, J, 0x3C);
       if (Addr >= 0x40E00 && Addr < 0x40E10) {
+        *Ldoc3Hits += 1;
         LogLine ("%a  t%u c%u addr 0x%05x data 0x%08x st 0x%08x <== LDOC3", Label, T, J, Addr, Data, Status);
       } else if (Addr >= 0x42500 && Addr < 0x42510) {
+        *Ldoc8Hits += 1;
         LogLine ("%a  t%u c%u addr 0x%05x data 0x%08x st 0x%08x <== LDOC8", Label, T, J, Addr, Data, Status);
       } else {
         LogLine ("%a  t%u c%u addr 0x%05x data 0x%08x st 0x%08x", Label, T, J, Addr, Data, Status);
@@ -413,9 +428,10 @@ TscCrcKermit (
 }
 
 STATIC
-VOID
+BOOLEAN
 UefiTouchCheck (
-  IN CHAR8  *Label
+  IN CHAR8  *Label,
+  OUT UINT8  *IdOut
   )
 {
   UINT8   Frame[8];
@@ -457,15 +473,74 @@ UefiTouchCheck (
       );
     if (Calc == Read && Rx[0] != 0 && Rx[1] != 0) {
       LogLine ("%a: CHIP ALIVE id %02X %02X", Label, Rx[0], Rx[1]);
-      return;
+      IdOut[0] = Rx[0];
+      IdOut[1] = Rx[1];
+      return TRUE;
     }
   }
   LogLine ("%a: chip silent", Label);
+  IdOut[0] = 0;
+  IdOut[1] = 0;
+  return FALSE;
 }
 
 //
 // ---------- sampling ----------
 //
+
+typedef struct {
+  CHAR8    Label[16];
+  BOOLEAN  Alive;
+  UINT8    Id[2];
+  UINT32   Ldoc3Hits;
+  UINT32   Ldoc8Hits;
+} SAMPLE_RESULT;
+
+STATIC SAMPLE_RESULT  gResults[3];
+STATIC UINTN          gResultCount;
+
+//
+// Print one line to the console (if up) and stall, historic
+// Say() style, so a human can read results off the screen
+// during a deliberately slowed boot.
+//
+STATIC
+VOID
+Say (
+  IN CHAR8  *Text
+  )
+{
+  CHAR16  Uni[256];
+  UINTN   I;
+
+  for (I = 0; Text[I] != 0 && I < 250; I++) {
+    Uni[I] = (CHAR16)Text[I];
+  }
+  Uni[I] = 0;
+  if (gST->ConOut != NULL) {
+    gST->ConOut->OutputString (gST->ConOut, Uni);
+    gST->ConOut->OutputString (gST->ConOut, L"\r\n");
+  }
+  gBS->Stall (2000000);
+}
+
+STATIC
+VOID
+SayResult (
+  IN SAMPLE_RESULT  *R
+  )
+{
+  CHAR8  Line[160];
+
+  AsciiSPrint (
+    Line, sizeof (Line),
+    "%a: touch %a %02X %02X, TCS ldoc3 x%u ldoc8 x%u",
+    R->Label,
+    R->Alive ? "ALIVE" : "silent",
+    R->Id[0], R->Id[1], R->Ldoc3Hits, R->Ldoc8Hits
+    );
+  Say (Line);
+}
 
 STATIC
 VOID
@@ -473,36 +548,26 @@ Sample (
   IN CHAR8  *Label
   )
 {
+  SAMPLE_RESULT  *R;
+  UINTN          I;
+
   LogLine ("=== SAMPLE %a ===", Label);
-  TcsDump (Label);
-  UefiTouchCheck (Label);
-}
+  if (gResultCount >= 3) {
+    return;
+  }
+  R = &gResults[gResultCount];
+  AsciiStrCpyS (R->Label, sizeof (R->Label), Label);
+  TcsDump (Label, &R->Ldoc3Hits, &R->Ldoc8Hits);
+  R->Alive = UefiTouchCheck (Label, R->Id);
+  gResultCount++;
 
-STATIC
-VOID
-EFIAPI
-EndOfDxeNotify (
-  IN EFI_EVENT  Event,
-  IN VOID       *Context
-  )
-{
-  ProbeOpen ();
-  Sample ("ENDOFDXE");
-  gBS->CloseEvent (Event);
-}
-
-STATIC
-VOID
-EFIAPI
-ReadyToBootNotify (
-  IN EFI_EVENT  Event,
-  IN VOID       *Context
-  )
-{
-  ProbeOpen ();
-  Sample ("READYTOBOOT");
-  ProbeClose ();
-  gBS->CloseEvent (Event);
+  //
+  // Re-print the whole verdict table so far: the console may
+  // not have been up at the earlier samples.
+  //
+  for (I = 0; I < gResultCount; I++) {
+    SayResult (&gResults[I]);
+  }
 }
 
 EFI_STATUS
@@ -515,7 +580,7 @@ RailProbeEntry (
   EFI_EVENT  Event;
 
   ProbeOpen ();
-  LogLine ("RailProbe v1.0 (E5 base: no TscPwrDxe; read-only)");
+  LogLine ("RailProbe v1.1 (E5 base: no TscPwrDxe; read-only; screen verdicts)");
   Sample ("ENTRY");
 
   if (EFI_ERROR (gBS->CreateEventEx (
