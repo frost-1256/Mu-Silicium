@@ -3,7 +3,7 @@
   BASE_NAME                      = RailProbeDxe
   FILE_GUID                      = 95e3615f-87cd-464a-97d9-fcbad0d9d31a
   MODULE_TYPE                    = DXE_DRIVER
-  VERSION_STRING                 = 1.1
+  VERSION_STRING                 = 1.2
   ENTRY_POINT                    = RailProbeEntry
 
 [Sources]

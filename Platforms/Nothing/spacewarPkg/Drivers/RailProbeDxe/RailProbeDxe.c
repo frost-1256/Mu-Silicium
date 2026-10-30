@@ -593,8 +593,6 @@ ReadyToBootNotify (
 {
   ProbeOpen ();
   Sample ("READYTOBOOT");
-  Say ("RailProbe done - holding 15 s");
-  gBS->Stall (15000000);
   ProbeClose ();
   gBS->CloseEvent (Event);
 }
@@ -609,7 +607,7 @@ RailProbeEntry (
   EFI_EVENT  Event;
 
   ProbeOpen ();
-  LogLine ("RailProbe v1.1 (E5 base: no TscPwrDxe; read-only; screen verdicts)");
+  LogLine ("RailProbe v1.2 (E5 base: no TscPwrDxe; read-only; screen verdicts, no RTB hold)");
   Sample ("ENTRY");
 
   if (EFI_ERROR (gBS->CreateEventEx (
