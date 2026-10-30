@@ -19,7 +19,6 @@
   PrintLib
   BaseLib
   BaseMemoryLib
-  UefiRuntimeServicesTableLib
   UefiLib
 
 [Protocols]

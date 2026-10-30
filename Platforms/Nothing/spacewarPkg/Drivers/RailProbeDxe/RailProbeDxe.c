@@ -32,8 +32,9 @@
   block the boot.
 
   Results go to \RAILPROBE.TXT on the ESP (flushed per line,
-  backlog dumped when the file first becomes available) and,
-  as a backup, to the NV variable "RailProbe" at ReadyToBoot.
+  backlog dumped when the file first becomes available). UEFI
+  NV variables do not persist on this build (established
+  earlier), so the ESP file is the only result channel.
 **/
 
 #include <Uefi.h>
@@ -43,7 +44,6 @@
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/PrintLib.h>
-#include <Library/UefiRuntimeServicesTableLib.h>
 #include <Library/UefiLib.h>
 #include <Guid/EventGroup.h>
 #include <Protocol/SimpleFileSystem.h>
@@ -203,28 +203,6 @@ ProbeClose (
     gProbeRoot->Close (gProbeRoot);
     gProbeRoot = NULL;
   }
-}
-
-STATIC EFI_GUID  mProbeVendorGuid =
-  { 0x95e3615f, 0x87cd, 0x464a, { 0x97, 0xd9, 0xfc, 0xba, 0xd0, 0xd9, 0xd3, 0x1a } };
-
-STATIC
-VOID
-ProbeStoreVariable (
-  VOID
-  )
-{
-  if (gProbeLen == 0) {
-    return;
-  }
-  gRT->SetVariable (
-         L"RailProbe",
-         &mProbeVendorGuid,
-         EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS |
-         EFI_VARIABLE_NON_VOLATILE,
-         gProbeLen,
-         gProbeBuf
-         );
 }
 
 //
@@ -523,7 +501,6 @@ ReadyToBootNotify (
 {
   ProbeOpen ();
   Sample ("READYTOBOOT");
-  ProbeStoreVariable ();
   ProbeClose ();
   gBS->CloseEvent (Event);
 }
