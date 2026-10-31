@@ -4017,7 +4017,7 @@
 | USB Device Mode      |                       | ❔    |
 | USB Power Delivery   | UCSI enumerates; blocked by touch rail issue | ❌    |
 | Charging             |                       | ❔    |
-| WLAN                 | WPSS fails to start (Problem 31, STATUS_NOT_FOUND); native FW swap no change | ❌    |
+| WLAN                 | Works: stock-signed WPSS firmware + warm QcTrEE start chain; qcwlan needs fwVersion 00816 and a one-instruction SAR patch | ✅    |
 | CPU                  |                       | ✅    |
 | Touchscreen          | Custom FT3680 driver  | ✅    |
 | Bluetooth            | Binds, but starting it drops the touch power rails | ❌    |
