@@ -4013,18 +4013,18 @@
 | NFC Sensor           | I2C bus disabled (WHEA) | ❌    |
 | Temperature Sensor   |                       | ❔    |
 | Battery              | ACPI _STA fixed; pack drivers not staged yet | ❔    |
-| USB Host Mode        | Role switch proven via UCSI; blocked by touch rail issue | ❌    |
+| USB Host Mode        | Role switch proven via UCSI; host mode itself not working yet | ❌    |
 | USB Device Mode      |                       | ❔    |
-| USB Power Delivery   | UCSI enumerates; blocked by touch rail issue | ❌    |
+| USB Power Delivery   | UCSI enumerates; PD negotiation not working yet | ❌    |
 | Charging             |                       | ❔    |
 | WLAN                 | Works: stock-signed WPSS firmware + warm QcTrEE start chain; qcwlan needs fwVersion 00816 and a one-instruction SAR patch | ✅    |
 | CPU                  |                       | ✅    |
 | Touchscreen          | Custom FT3680 driver  | ✅    |
-| Bluetooth            | Binds, but starting it drops the touch power rails | ❌    |
+| Bluetooth            | Binds, but starting it kills touch (pin re-mux poison); coexistence with the auto-restore touch driver untested | ❌    |
 | GPS                  | Depends on modem firmware | ❌    |
 | Speakers             | No driver for the TFA9873 amps; no ACPI node for their I2C bus | ❌    |
 | Microphone           |                       | ❔    |
-| GPU                  | Enumerates (Basic Display). QCDX KMD starts but panel stays dark; blocked by touch rail issue | ❌    |
+| GPU                  | Enumerates (Basic Display). QCDX KMD starts but panel stays dark | ❌    |
 | Camera               | No sensor drivers in the pack (IMX766 / S5KJN1 / IMX471) | ❌    |
 | Mobile Data          | Feasible (works on lisa); cellular stack not staged yet | ❌    |
 | Display              |                       | ✅    |
