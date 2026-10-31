@@ -4020,7 +4020,7 @@
 | WLAN                 | Works: stock-signed WPSS firmware + warm QcTrEE start chain; qcwlan needs fwVersion 00816 and a one-instruction SAR patch | ✅    |
 | CPU                  |                       | ✅    |
 | Touchscreen          | Custom FT3680 driver  | ✅    |
-| Bluetooth            | Works: starts and device discovery works (DSDT v21: BTH0 UART SerialBus descriptor at RevisionID 1 for qcuart); touch coexists | ✅    |
+| Bluetooth            | Works: starts, discovery and pairing/connection verified (earbuds); DSDT v21 SerialBus RevisionID 1 fix for qcuart; touch coexists | ✅    |
 | GPS                  | Depends on modem firmware | ❌    |
 | Speakers             | No driver for the TFA9873 amps; no ACPI node for their I2C bus | ❌    |
 | Microphone           |                       | ❔    |
